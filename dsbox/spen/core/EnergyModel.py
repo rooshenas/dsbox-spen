@@ -2,7 +2,7 @@ import tensorflow as tf
 import tflearn
 import tflearn.initializations as tfi
 
-class EnergyModel():
+class EnergyModel:
   def __init__(self,config):
     self.config = config
 

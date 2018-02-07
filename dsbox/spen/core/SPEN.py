@@ -111,24 +111,6 @@ class SPEN:
       raise NotImplementedError
 
 
-
-
-  def project_simplex_norm(self, yd):
-    dim = self.config.dimension
-    y_min = np.min(yd, axis=2)
-    y_min_all = np.reshape(np.repeat(y_min, dim), (-1, self.config.output_num / dim, dim))
-    yd_pos = yd - y_min_all
-    yd_sum = np.reshape(np.repeat(np.sum(yd_pos, 2), dim), (-1, self.config.output_num / dim, dim))
-    yd_norm = np.divide(yd_pos, yd_sum)
-    return yd_norm
-
-  def project_simplex(self, yd):
-    return self.project_simplex_norm(yd)
-
-  def get_energy(self, reuse=False):
-    raise NotImplementedError
-
-
   def rank_training(self):
     self.h1 = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num])
     self.h2 = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num])
