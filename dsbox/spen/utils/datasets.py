@@ -84,7 +84,7 @@ def load_data(file):
   data = []
   for l in open(file, 'r'):
     y=map(lambda x: -1 if x == "*" else float(x), l.strip().split(','))
-    data.append(y)
+    data.append(list(y))
   data = np.array(data)
   return data
 
@@ -137,25 +137,25 @@ def get_ppi(ratio):
   return (xdata,xval, xtest,ydata,yval, ytest)
 
 def get_citation_data():
-    with open('CORA/X_train.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/X_train.pickle') as f:
       xdata = pickle.load(f)
 
-    with open('CORA/Y_train.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/Y_train.pickle') as f:
       ydata = pickle.load(f)
 
-    with open('CORA/X_dev.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/X_dev.pickle') as f:
       xval = pickle.load(f)
 
-    with open('CORA/Y_dev.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/Y_dev.pickle') as f:
       yval = pickle.load(f)
 
-    with open('CORA/X_test.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/X_test.pickle') as f:
       xtest = pickle.load(f)
 
-    with open('CORA/Y_test.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/Y_test.pickle') as f:
       ytest = pickle.load(f)
 
-    with open('CORA/X_unlabelled.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/X_unlabelled.pickle') as f:
       x_unlab = pickle.load(f)
 
     return xdata, xval, xtest, ydata, yval, ytest, x_unlab
@@ -322,10 +322,10 @@ def get_data_val(dataset, ratio):
   ydataval = load_data(ytrfile)
   xtest = load_data(xtsfile)
   xdataval = load_data(xtrfile)
+  print(np.shape(xdataval))
 
   size = np.shape(xdataval)[0]
-  indices =range(size)
-  np.random.shuffle(indices)
+  indices = np.random.permutation(np.arange(size))
   val_num = int(size*ratio)
   val_indices = indices[0:val_num]
   train_indices = indices[val_num:]
