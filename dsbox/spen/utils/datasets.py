@@ -9,8 +9,8 @@ def get_layers(dataset):
   scene_layers = [(300, 'relu'), (200, 'relu')]
   scene_enlayers = [(20, 'relu'), (20, 'relu')]
 
-  bibtexlayers = [(500, 'relu'), (250, 'relu')]
-  bibtex_enlayers = [(250, 'softplus'), (250, 'softplus')]
+  bibtexlayers = [(1000, 'relu')]
+  bibtex_enlayers = [(250, 'softplus')]
 
   dellayers = [(2500, 'relu'), (1500, 'relu')]
   # del_enlayers = [(100,'relu'), (50, 'relu')]

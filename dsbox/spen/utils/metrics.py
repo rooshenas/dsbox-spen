@@ -68,6 +68,9 @@ def token_level_loss_ar(cpred, ctrue ):
   except Warning:
     return None
 
+
+
+
 def hamming_loss(cpred, ctrue, cut=0.5):
   try:
     label_num = np.shape(cpred)[1]
