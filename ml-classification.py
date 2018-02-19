@@ -1,6 +1,5 @@
 
-from dsbox.spen.core.SPEN import SPEN, Config, TrainingType
-from  dsbox.spen.core.EnergyModel import EnergyModel
+from dsbox.spen.core import spen, config, energy
 import argparse
 import numpy as np
 from dsbox.spen.utils.metrics import f1_score, hamming_loss
@@ -13,10 +12,10 @@ parser.add_argument('-lr', dest='learning_rate', nargs='?', help='Learning rate'
 parser.add_argument('-ir', dest='inf_rate', nargs='?', help='Inference rate')
 parser.add_argument('-it', dest='inf_iter', nargs='?', help='Inference iteration')
 parser.add_argument('-mw', dest='margin_weight', nargs='?', help='Margin weight')
-parser.add_argument('-dp', dest='dropout')
 parser.add_argument('-ln', dest='labeled_num', nargs='?', help='Number of labeled data')
 parser.add_argument('-l2', dest='l2_penalty', nargs='?', help='L2 penalty')
 parser.add_argument('-data', dest='dataset', nargs='?', help='Dataset name')
+parser.add_argument('-dp', dest='dropout', nargs='?', help='Dropout')
 
 args = parser.parse_args()
 
@@ -39,7 +38,7 @@ else:
 if args.learning_rate:
     lr = float(args.learning_rate)
 else:
-    lr = 0.0
+    lr = 0.001
 
 if args.inf_iter:
   inf_iter = float(args.inf_iter)
@@ -56,6 +55,12 @@ if args.margin_weight:
 else:
   mw = 100.0
 
+if args.dropout:
+  dp = float(args.dropout)
+else:
+  dp = 0.0
+
+bs = 100
 
 def perf(ytr_pred, yval_pred, yts_pred, ydata, yval, ytest):
   global best_val_f1
@@ -112,19 +117,22 @@ def train_sup(spen, num_steps):
       xbatch = xlabeled[indices][:]
       ybatch = ylabeled[indices][:]
 
-      spen.train_batch(xbatch, ybatch)
       spen.set_train_iter(i)
+      o = spen.train_batch(xbatch, ybatch)
+      #print (i, b, o)
 
 
-    if i % 10 == 0:
-      yts_out = spen.get_max(xtest, ascent=True)
-      yval_out = spen.get_max(xval)
-      ytr_out = spen.get_max(xdata)
+    if i % 2 == 0:
+      yts_out = spen.map_predict(xinput=xtest)
+      yval_out = spen.map_predict(xinput=xval)
+      ytr_out = spen.map_predict(xinput=xdata)
       perf(ytr_out, yval_out, yts_out, ydata, yval, ytest)
 
 
 
 xdata, xval, xtest, ydata, yval, ytest= get_data_val(dataset,0.3)
+
+print(np.shape(xdata))
 
 output_num = np.shape(ydata)[1]
 input_num = np.shape(xdata)[1]
@@ -135,19 +143,12 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 best_val_f1 = 0.0
 test_f1 = 0.0
 
-config = Config()
-config.batch_size = bs
+config = config.Config()
 config.l2_penalty = l2
-
-if args.inf_iter:
-  config.inf_iter = float(args.inf_iter)
-if args.inf_rate:
-  config.inf_rate = float(args.inf_rate)
-if args.learning_rate:
-  config.learning_rate = float(args.learning_rate)
-
-if args.dropout:
-  config.dropout = float(args.dropout)
+config.inf_iter = inf_iter
+config.inf_rate = inf_rate
+config.learning_rate = lr
+config.dropout = dp
 config.dimension = 2
 config.output_num = output_num
 config.input_num = input_num
@@ -156,13 +157,16 @@ config.layer_info = f_layers
 config.margin_weight = mw
 config.output_num = output_num
 
-s = SPEN(config)
-e = EnergyModel(config)
+s = spen.SPEN(config)
+e = energy.EnergyModel(config)
 
+#s.eval = lambda xd, yd, yt : f1_score_c_ar(yd, yt)
+s.get_energy = e.get_energy_mlp
+#s.prediction_net = e.softmax_prediction_network
+s.train_batch = s.train_supervised_batch
+
+s.construct(training_type=spen.TrainingType.SSVM)
+s.print_vars()
 
 start = time.time()
-s.get_energy = e.get_energy_mlp
-s.train_batch = s.train_rank_supervised_batch
-s.construct(training_type=TrainingType.Rank_Based)
-s.print_vars()
 train_sup(s, 10000)
