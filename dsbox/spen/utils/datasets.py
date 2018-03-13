@@ -46,14 +46,16 @@ def get_layers(dataset):
   c20ng_enlayers = [(300, 'relu'),(200, 'relu')]
 
 
-  citation_layers = [(1000, 'relu')]
-  citation_enlayers = [(200, 'softplus')]
+  citation_layers = [(1000, 'relu'),(500, 'relu')]
+  citation_enlayers = [(500, 'softplus'),(200, 'softplus')]
 
   medical_layers = [(1000, 'relu'), (500, 'relu')]
   medical_enlayers = [(100, 'softplus')]
 
   kddcup_layers = [(1500, 'relu'), (1500, 'relu')]
   kddcup_enlayers = [(500, 'relu'), (500, 'relu')]
+
+
 
   datasets = {"scene":[],
             "yeast":(yeastlayers,yeastenlayers),
@@ -309,6 +311,38 @@ def get_data_libra(dataset, evnum):
   ytest = test[:, yvars]
 
   return (xdata,xval, xtest,ydata,yval, ytest, evvars, yvars)
+
+def get_dependency_data():
+  root_path = "/iesl/canvas/svenkitachal/dep_parse/data/"
+  with open(root_path + 'X_train.pkl') as f:
+    xdata = pickle.load(f)
+
+  with open(root_path + 'pos_train.pkl') as f:
+    posdata = pickle.load(f)
+
+  with open(root_path + 'Y_train.pkl') as f:
+    ydata = pickle.load(f)
+
+  with open(root_path + 'X_dev.pkl') as f:
+    posval = pickle.load(f)
+
+  with open(root_path + 'pos_dev.pkl') as f:
+    xval = pickle.load(f)
+
+  with open(root_path + 'Y_dev.pkl') as f:
+    yval = pickle.load(f)
+
+  with open(root_path + 'X_test.pkl') as f:
+    xtest = pickle.load(f)
+
+  with open(root_path + 'pos_test.pkl') as f:
+    postest = pickle.load(f)
+
+  with open(root_path + 'Y_test.pkl') as f:
+    ytest = pickle.load(f)
+
+  return xdata, xval, xtest, posdata, posval, postest, ydata, yval, ytest
+
 
 def get_data_val(dataset, ratio):
   if dataset == "ppi":

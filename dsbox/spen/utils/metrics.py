@@ -34,6 +34,38 @@ def token_level_loss(cpred, ctrue):
   except Warning:
     return (0.0,0.0);
 
+def token_level_loss_dep(cpred, ctrue):
+  try:
+    label_num = np.shape(cpred)[1]
+    pred = cpred.astype(np.int)
+    true = ctrue.astype(np.int)
+    n1 = len(pred)
+    n2 = len(true)
+    assert n1 == n2
+    hloss = 0.0
+    exact_acc = 0.0
+    for i in range(n1):
+      sample_loss = 0.0
+      exact = 0.0
+      xp = pred[i]
+      xt = true[i]
+      cnp = 0
+      for j in range(label_num):
+        if (xt[j] == 249):
+          continue
+        cnp+=1
+        if xp[j] != xt[j]:
+          sample_loss += 1.0
+        else:
+          exact +=1
+      sample_loss = sample_loss / cnp
+      exact = exact / cnp
+      hloss += sample_loss
+      exact_acc += exact
+    return (hloss / n1, exact_acc / n1)
+  except Warning:
+    return (0.0,0.0);
+
 def token_level_loss_ar(cpred, ctrue ):
   label_num = np.shape(cpred)[1]
   results = []
