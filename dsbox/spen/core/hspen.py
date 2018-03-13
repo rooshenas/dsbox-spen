@@ -125,12 +125,15 @@ class HSPEN:
     self.yp1 = self.prediction_net(hidden_vars=self.h1)
     self.yp2 = self.prediction_net(hidden_vars=self.h2, reuse=True)
     #self.yp2 = self.yp1
-    flat_yp1 =tf.reshape(self.yp1, shape=(-1, self.config.output_num*self.config.dimension))
+    flat_yp1 = tf.reshape(self.yp1, shape=(-1, self.config.output_num*self.config.dimension))
     flat_yp2 = tf.reshape(self.yp2, shape=(-1, self.config.output_num*self.config.dimension))
 
     self.spen_y1 = self.get_energy(xinput=self.x, yinput=self.h1, embedding=self.embedding)
     self.spen_y2 = self.get_energy(xinput=self.x, yinput=self.h2, embedding=self.embedding, reuse=True)
 
+
+    ent_yp1 = -tf.reduce_sum(flat_yp1 * tf.log(tf.maximum(flat_yp1, 1e-20)), 1)
+    ent_yp2 = -tf.reduce_sum(flat_yp2 * tf.log(tf.maximum(flat_yp2, 1e-20)), 1)
 
     self.spen = self.spen_y1
     self.h = self.h1
@@ -151,13 +154,13 @@ class HSPEN:
     self.v2_sum = tf.reduce_sum(self.ce2)
     self.e1_sum = tf.reduce_sum(self.spen_y1)
     self.e2_sum = tf.reduce_sum(self.spen_y2)
-    self.objective = obj1 #+ self.config.l2_penalty * vloss  # + obj2
+    self.objective = obj1 + 1.0 * tf.reduce_sum(ent_yp1+ ent_yp2)#+ self.config.l2_penalty * vloss  # + obj2
     self.num_update = tf.reduce_sum(
       tf.cast((self.ce2 - self.ce1) * self.margin_weight_ph >= (self.spen_y1 - self.spen_y2), tf.float32))
     ce = tf.reduce_sum(self.y * tf.log(tf.maximum(self.yp, 1e-20)), 1)
     self.pred_obj = -tf.reduce_sum(ce)
 
-    self.pred_train_step = tf.train.AdamOptimizer(self.learning_rate_ph).minimize(self.pred_obj,  var_list=[self.pred_variables(), self.fnet_variables()])
+    #self.pred_train_step = tf.train.AdamOptimizer(self.learning_rate_ph).minimize(self.pred_obj,  var_list=[self.pred_variables(), self.fnet_variables()])
     self.train_step = tf.train.AdamOptimizer(self.learning_rate_ph).minimize(self.objective)
 
     return self
@@ -177,7 +180,7 @@ class HSPEN:
 
     """
     if inf_iter is None:
-      inf_iter = self.config.inf_rate
+      inf_iter = self.config.inf_iter
     tflearn.is_training(is_training=train, session=self.sess)
     bs = np.shape(xd)[0]
 
@@ -208,11 +211,14 @@ class HSPEN:
 
 
     h_a  = self.inference( xd, train=True, ascent=ascent, inf_iter=self.config.inf_iter)
+    h_a = np.flip(h_a, axis=0)
 
     en_a = np.array([self.sess.run(self.spen, feed_dict={self.x: xd,
                 self.h: np.reshape(h_i, (-1,self.config.hidden_num)),
                 self.dropout_ph: self.config.dropout}) for h_i in h_a ])
     yp_a = np.array([self.h_map_predict(h_i) for h_i in h_a])
+
+
 
     f_a = np.array([self.eval(xd, y_i, yt=yt) for y_i in yp_a])
     size = np.shape(xd)[0]
@@ -329,10 +335,10 @@ class HSPEN:
   def train_batch(self, xbatch=None, ybatch=None):
     raise NotImplementedError
 
-  def train_rank_supervised_batch(self, xbatch, ybatch):
+  def train_rank_supervised_batch(self, xbatch, ybatch, verbose=0):
     ybatch_ind = self.var_to_indicator(ybatch)
     if self._train_iter > 1:
-      for j in range(50):
+      for j in range(-1):
         _, o2 = self.sess.run([self.pred_train_step, self.pred_obj],
                               feed_dict={self.x: xbatch, self.y: ybatch_ind, self.h: self.hpredict(xbatch),
                                          self.learning_rate_ph: self.config.learning_rate,
@@ -364,7 +370,7 @@ class HSPEN:
                                                self.e1_sum, self.e2_sum, self.yp1],
                                               feed_dict=feeddic )
     print (obj,n, v1,v2,e1,e2)
-    print ("yp:", yp[0,0,:])
-    print ("yt:", yd_ind[0,0,:])
+    #print ("yp:", yp[0,0,:])
+    #print ("yt:", yd_ind[0,0,:])
     return obj,  np.shape(xd)[0]
 

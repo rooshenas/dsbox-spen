@@ -90,6 +90,8 @@ class SPEN:
     self.yp = tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYP")
     self.yt = tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
 
+
+
     self.energy_yp = self.get_energy(xinput=self.x, yinput=self.yp, embedding=self.embedding)
     self.energy_yt = self.get_energy(xinput=self.x, yinput=self.yt, embedding=self.embedding, reuse=True)
 
@@ -106,7 +108,45 @@ class SPEN:
     self.total_energy_yt = tf.reduce_sum(self.energy_yt)
     self.total_energy_yp = tf.reduce_sum(self.energy_yp)
 
-    self.train_step = tf.train.AdamOptimizer(self.learning_rate_ph).minimize(self.objective, var_list=self.spen_variables())
+    self.train_step = self.optimizer.minimize(self.objective, var_list=self.spen_variables())
+
+  def rank_based_training(self):
+    self.margin_weight_ph = tf.placeholder(tf.float32, shape=[], name="Margin")
+    self.value_h = tf.placeholder(tf.float32, shape=[None])
+    self.value_l = tf.placeholder(tf.float32, shape=[None])
+    self.yp_h_ind = tf.placeholder(tf.float32,
+                          shape=[None, self.config.output_num * self.config.dimension],
+                          name="YP_H")
+
+
+    self.yp_l_ind = tf.placeholder(tf.float32,
+                          shape=[None, self.config.output_num * self.config.dimension],
+                          name="YP_L")
+
+    self.energy_yh = self.get_energy(xinput=self.x, yinput=self.yp_h_ind, embedding=self.embedding,
+                                     reuse=self.config.pretrain)
+    self.energy_yl = self.get_energy(xinput=self.x, yinput=self.yp_l_ind, embedding=self.embedding,
+                                     reuse=True)
+
+
+    self.energy_yp = self.energy_yh
+    self.yp = self.yp_h_ind
+
+    self.energy_ygradient = tf.gradients(self.energy_yp, self.yp)[0]
+
+    vloss = 0
+    for v in self.spen_variables():
+      vloss = vloss + tf.nn.l2_loss(v)
+
+    obj1 = tf.reduce_sum( tf.maximum( (self.value_h - self.value_l)*self.margin_weight_ph - self.energy_yh + self.energy_yl, 0.0))
+    self.vh_sum = tf.reduce_sum (self.value_h)
+    self.vl_sum = tf.reduce_sum (self.value_l)
+    self.eh_sum = tf.reduce_sum(self.energy_yh)
+    self.el_sum = tf.reduce_sum(self.energy_yl)
+    self.objective = obj1 +  self.config.l2_penalty * vloss #+ obj2
+    self.num_update = tf.reduce_sum(tf.cast( (self.value_h - self.value_l)*self.margin_weight_ph  >= (self.energy_yh - self.energy_yl), tf.float32))
+    self.train_step = self.optimizer.minimize(self.objective, var_list=self.spen_variables())
+    return self
 
 
   def construct_embedding(self, embedding_size, vocabulary_size):
@@ -121,12 +161,14 @@ class SPEN:
 
     return self
 
+  def createOptimizer(self):
+    self.optimizer = tf.train.AdamOptimizer(self.learning_rate_ph)
 
   def construct(self, training_type = TrainingType.SSVM ):
     if training_type == TrainingType.SSVM:
       return self.ssvm_training()
     elif training_type == TrainingType.Rank_Based:
-      raise NotImplementedError
+      return self.rank_based_training()
     else:
       raise NotImplementedError
 
@@ -151,47 +193,10 @@ class SPEN:
     yd_norm = self.project_simplex_norm(yd)
     return self.var_to_indicator(yd_norm)
 
-  def softmax(self, y, theta=1.0, axis=None):
-    """
-    Compute the softmax of each element along an axis of X.
-
-    Parameters
-    ----------
-    X: ND-Array. Probably should be floats.
-    theta (optional): float parameter, used as a multiplier
-        prior to exponentiation. Default = 1.0
-    axis (optional): axis to compute values along. Default is the
-        first non-singleton axis.
-
-    Returns an array the same size as X. The result will sum to 1
-    along the specified axis.
-    """
-
-
-    if axis is None:
-      axis = next(j[0] for j in enumerate(y.shape) if j[1] > 1)
-
-    # multiply y against the theta parameter,
-    y = y * float(theta)
-
-    # subtract the max for numerical stability
-    y = y - np.expand_dims(np.max(y, axis=axis), axis)
-
-    # exponentiate y
-    y = np.exp(y)
-
-    # take the sum along the specified axis
-    ax_sum = np.expand_dims(np.sum(y, axis=axis), axis)
-
-    # finally: divide elementwise
-    p = y / ax_sum
-
-    return p
-
 
   def inference(self, xinput=None, yinput=None, inf_iter=None, ascent=True, train=False):
     if inf_iter is None:
-      inf_iter = self.config.inf_rate
+      inf_iter = self.config.inf_iter
     tflearn.is_training(is_training=train, session=self.sess)
     size = np.shape(xinput)[0]
     if yinput is not None:
@@ -199,7 +204,7 @@ class SPEN:
 
     yp_ind = np.random.uniform(0, 1, (size, self.config.output_num * self.config.dimension))
     yp_ind = self.project_simplex_norm(yp_ind)
-    i=0
+    i = 0
     yp_a = []
     while i < inf_iter:
       if yinput is not None:
@@ -217,11 +222,74 @@ class SPEN:
       else:
         yp_ind = yp_ind - self.config.inf_rate * g
 
-      yp = self.softmax(np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension)), axis=2, theta=1)
+      yp_ind = self.project_simplex_norm(yp_ind)
+      yp = np.reshape(yp_ind, (-1,self.config.output_num, self.config.dimension))
       yp_a.append(yp)
       i += 1
 
     return np.array(yp_a)
+
+  def evaluate(self, xinput=None, yinput=None, yt=None):
+    raise NotImplementedError
+
+
+
+  def get_first_large_consecutive_diff(self, xinput=None, inf_iter=None, ascent=True):
+    self.inf_objective = self.energy_yp
+    self.inf_gradient = self.energy_ygradient
+
+    y_a = self.inference(xinput=xinput, train=True, ascent=ascent, inf_iter=inf_iter)
+
+
+    en_a = np.array([self.sess.run(self.inf_objective,
+                feed_dict={self.x: xinput,
+                           self.yp: np.reshape(y_i, (-1,self.config.output_num*self.config.dimension)),
+                           self.dropout_ph: self.config.dropout})
+                     for y_i in y_a ])
+    f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(y_i,2)) for y_i in y_a])
+
+
+    print (np.average(en_a, axis=1))
+    print (np.average(f_a, axis=1))
+
+    size = np.shape(xinput)[0]
+    t = np.array(range(size))
+    f1 = []
+    f2 = []
+    y1 = []
+    y2 = []
+    x = []
+    k = 0
+    it = np.shape(y_a)[0]
+    for k in range(it-1):
+      for i in t:
+        if f_a[k,i] > f_a[k+1,i]:
+          i_h = k
+          i_l = k + 1
+        else:
+          i_l = k
+          i_h = k + 1
+
+        f_h = f_a[i_h,i]
+        f_l = f_a[i_l,i]
+        e_h = en_a[i_h,i]
+        e_l = en_a[i_l,i]
+
+        violation = (f_h - f_l)*self.config.margin_weight - e_h + e_l
+        if violation > 0:
+          f1.append(f_h)
+          f2.append(f_l)
+          y1.append((y_a[i_h,i,:]))
+          y2.append((y_a[i_l,i,:]))
+          x.append(xinput[i,:])
+
+    x = np.array(x)
+    f1 = np.array(f1)
+    f2 = np.array(f2)
+    y1 = np.array(y1)
+    y2 = np.array(y2)
+
+    return x, y1, y2, f1, f2
 
 
 
@@ -229,6 +297,8 @@ class SPEN:
     self.inf_objective = self.energy_yp
     self.inf_gradient = self.energy_ygradient
     y_a = self.inference(xinput=xinput, inf_iter=inf_iter, train=train, ascent=ascent)
+
+
     return y_a[-1]
 
   def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True):
@@ -248,6 +318,28 @@ class SPEN:
 
   def train_batch(self, xbatch=None, ybatch=None, verbose=0):
     raise NotImplementedError
+
+
+  def train_unsupervised_batch(self, xbatch=None, verbose=0):
+    tflearn.is_training(True, self.sess)
+    x_b, y_h, y_l, l_h, l_l = self.get_first_large_consecutive_diff(xinput=xbatch, ascent=True)
+    if np.size(l_h) > 1:
+      _, o1, n1, v1, v2, e1, e2  = self.sess.run([self.train_step, self.objective, self.num_update, self.vh_sum, self.vl_sum, self.eh_sum, self.el_sum],
+              feed_dict={self.x:x_b,
+                         self.yp_h_ind:np.reshape(y_h, (-1, self.config.output_num * self.config.dimension)),
+                         self.yp_l_ind:np.reshape(y_l, (-1, self.config.output_num * self.config.dimension)),
+                         self.value_l: l_l,
+                         self.value_h: l_h,
+                         self.learning_rate_ph:self.config.learning_rate,
+                         self.dropout_ph: self.config.dropout,
+                         self.margin_weight_ph: self.config.margin_weight})
+      if verbose>0:
+        print (self.train_iter, o1, n1, v1,v2, e1,e2, np.shape(xbatch)[0], np.shape(x_b)[0])
+    else:
+      if verbose>0:
+        print ("skip")
+    return
+
 
   def train_supervised_batch(self, xbatch, ybatch, verbose=0):
     tflearn.is_training(True, self.sess)
