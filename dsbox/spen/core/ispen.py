@@ -17,6 +17,7 @@ class TrainingType(Enum):
   Value_Matching = 1
   SSVM = 2
   Rank_Based = 3
+  End2End = 4
 
 class SPEN:
   def __init__(self,config):
@@ -92,6 +93,44 @@ class SPEN:
 
   def createOptimizer(self):
     self.optimizer = tf.train.AdamOptimizer(self.learning_rate_ph)
+
+  def get_prediction_net(self, input=None, reuse=False):
+    raise NotImplementedError
+
+  def get_feature_net(self, xinput, output_num, embedding=None, reuse=False):
+    raise NotImplementedError
+
+  def end2end_training(self):
+    self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
+    self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
+    self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
+    #self.h = self.get_feature_net(self.x, self.config.hidden_num, embedding=self.embedding)
+
+    self.h_penalty =   self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(self.h),1)
+    self.avg_penalty = tf.reduce_mean(self.h_penalty)
+    self.energy_h = self.get_energy(xinput=self.x, yinput=self.h, embedding=self.embedding) - self.h_penalty
+    h_current = self.h
+    self.objective = 0.0
+    self.yp_ar = [self.get_prediction_net(input=h_current)]
+    for i in range(int(self.config.inf_iter)):
+      h_next = h_current + self.config.inf_rate * tf.gradients(self.energy_h, self.h)[0]
+
+
+      h_current = h_next
+      yp_current = self.get_prediction_net(input=h_current, reuse=True)
+      ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
+      l = -tf.reduce_sum(self.yt_ind * tf.log(tf.maximum(ind, 1e-20)))
+      self.objective = 0.2*self.objective + 0.8*l
+      self.yp_ar.append(yp_current)
+
+    #self.opjective = l
+    self.h_state = h_current
+    self.yp = self.yp_ar[-1] #self.get_prediction_net(input=self.h_state)
+
+    self.yp_ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension], name="reshaped")
+    #self.objective = -tf.reduce_sum(self.yt_ind * tf.log( tf.maximum(self.yp_ind, 1e-20)))
+    self.train_step = self.optimizer.minimize(self.objective)
+
 
   def ssvm_training(self):
     self.margin_weight_ph = tf.placeholder(tf.float32, shape=[], name="Margin")
@@ -205,6 +244,8 @@ class SPEN:
       return self.ssvm_training()
     elif training_type == TrainingType.Rank_Based:
       return self.rank_based_training()
+    elif training_type == TrainingType.End2End:
+      return self.end2end_training()
     else:
       raise NotImplementedError
 
@@ -359,7 +400,7 @@ class SPEN:
 
     y_a = self.inference( xinput=xinput, train=True, ascent=ascent, inf_iter=inf_iter)
 
-
+    y_a = y_a[-10:]
 
     en_a = np.array([self.sess.run(self.inf_objective,
                 feed_dict={self.x: xinput,
@@ -458,43 +499,78 @@ class SPEN:
 
     return x, y, yp
 
-
-  def soft_predict(self, xinput=None, train=False, inf_iter=None, ascent=True):
+  def h_predict(self, xinput=None, train=False, inf_iter=None, ascent=True):
     tflearn.is_training(is_training=train, session=self.sess)
-    self.inf_objective = self.energy_yp
-    self.inf_gradient = self.energy_ygradient
-    y_a = self.inference(xinput=xinput, inf_iter=inf_iter, train=train, ascent=ascent)
-
-    en_a = np.array([self.sess.run(self.energy_yp,
-                      feed_dict={self.x: xinput,
-                                 self.yp_ind: np.reshape(y_i, (-1, self.config.output_num * self.config.dimension)),
-                                 self.inf_penalty_weight_ph: self.config.inf_penalty,
-                                 self.dropout_ph: self.config.dropout}) for y_i in y_a])
-    try:
-      for i in range(len(en_a)):
-        y_i = y_a[i]
-        f_i = np.array(self.evaluate(xinput=xinput, yinput=np.argmax(y_i, 2)))
-        print ("----------------------------")
-        print (i, np.average(en_a[i,:]), np.average(f_i))
+    h_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.hidden_num))
+    feeddic = {self.x: xinput,
+                 self.h: h_init,
+                 self.inf_penalty_weight_ph: self.config.inf_penalty,
+                 self.dropout_ph: self.config.dropout}
+    h = self.sess.run(self.h_state ,feed_dict=feeddic)
+    return h
 
 
-      y_ans = y_a[-1]
+  def soft_predict(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False):
+    tflearn.is_training(is_training=train, session=self.sess)
+    if end2end:
+      #h_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.hidden_num))
+      h_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.hidden_num))
+      feeddic = {self.x: xinput,
+                 self.h: h_init,
+                 self.inf_penalty_weight_ph: self.config.inf_penalty,
+                 self.dropout_ph: self.config.dropout}
+      yp = self.sess.run(self.yp, feed_dict=feeddic)
+    else:
 
-      #f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(y_i,2)) for y_i in y_a])
-      #ind = np.argmax(f_a,0) if ascent else np.argmin(f_a, 0)
-      #y_ans = np.array([y_a[ind[i],i,:] for i in range(np.shape(xinput)[0])])
-    except:
-      y_ans = y_a[-1]
-    yp = self.softmax(y_ans, axis=2, theta=1)
-    en = -np.sum(yp * np.log(yp+1e-20))
+      self.inf_objective = self.energy_yp
+      self.inf_gradient = self.energy_ygradient
+      y_a = self.inference(xinput=xinput, inf_iter=inf_iter, train=train, ascent=ascent)
+
+      en_a = np.array([self.sess.run(self.energy_yp,
+                        feed_dict={self.x: xinput,
+                                   self.yp_ind: np.reshape(y_i, (-1, self.config.output_num * self.config.dimension)),
+                                   self.inf_penalty_weight_ph: self.config.inf_penalty,
+                                   self.dropout_ph: self.config.dropout}) for y_i in y_a])
+      try:
+        for i in range(len(en_a)):
+          y_i = y_a[i]
+          f_i = np.array(self.evaluate(xinput=xinput, yinput=np.argmax(y_i, 2)))
+          print ("----------------------------")
+          print (i, np.average(en_a[i,:]), np.average(f_i))
 
 
-    print (np.average(np.square(yp)), en, np.average(np.max(yp,2)))
+        y_ans = y_a[-1]
+
+        #f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(y_i,2)) for y_i in y_a])
+        #ind = np.argmax(f_a,0) if ascent else np.argmin(f_a, 0)
+        #y_ans = np.array([y_a[ind[i],i,:] for i in range(np.shape(xinput)[0])])
+      except:
+        y_ans = y_a[-1]
+      yp = self.softmax(y_ans, axis=2, theta=1)
+      en = -np.sum(yp * np.log(yp+1e-20))
+
+
+      print (np.average(np.square(yp)), en, np.average(np.max(yp,2)))
 
     return yp
 
-  def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True):
-    yp = self.soft_predict(xinput=xinput, train=train, inf_iter=inf_iter, ascent=ascent)
+  def map_predict_trajectory(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False):
+    if end2end:
+      tflearn.is_training(train, self.sess)
+      h_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.hidden_num))
+      feeddic = {self.x: xinput,
+                 self.h: h_init,
+                 self.inf_penalty_weight_ph: self.config.inf_penalty,
+                 self.dropout_ph: self.config.dropout}
+      soft_yp_ar = self.sess.run(self.yp_ar, feed_dict=feeddic)
+      yp_ar =  [np.argmax(yp, 2) for yp in soft_yp_ar]
+      return yp_ar
+    else:
+      raise NotImplementedError
+
+
+  def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False):
+    yp = self.soft_predict(xinput=xinput, train=train, inf_iter=inf_iter, ascent=ascent, end2end=end2end)
     return np.argmax(yp, 2)
 
   #def inference_trajectory(self):
@@ -583,3 +659,19 @@ class SPEN:
     if verbose > 0:
       print (self.train_iter ,o,n, en_yt, en_yhat)
     return n
+
+  def train_supervised_e2e_batch(self, xbatch, ybatch, verbose=0):
+    tflearn.is_training(True, self.sess)
+    yt_ind = self.var_to_indicator(ybatch)
+    yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+    h_init = np.random.normal(0, 1, size=(np.shape(xbatch)[0], self.config.hidden_num))
+    feeddic = {self.x:xbatch, self.yt_ind: yt_ind,
+               self.h: h_init,
+               self.learning_rate_ph:self.config.learning_rate,
+               self.inf_penalty_weight_ph: self.config.inf_penalty,
+               self.dropout_ph: self.config.dropout}
+
+    _, o,p  = self.sess.run([self.train_step, self.objective, self.avg_penalty], feed_dict=feeddic)
+    if verbose > 0:
+      print (self.train_iter ,o, p)
+    return o

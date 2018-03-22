@@ -1,5 +1,7 @@
 import numpy as np
 import pickle
+import pandas as pd
+
 
 def get_layers(dataset):
   yeastlayers = [(300, 'relu'), (200, 'relu')]
@@ -47,7 +49,7 @@ def get_layers(dataset):
 
 
   citation_layers = [(1000, 'relu'),(500, 'relu')]
-  citation_enlayers = [(500, 'softplus'),(200, 'softplus')]
+  citation_enlayers = [(1000, 'softplus')]
 
   medical_layers = [(1000, 'relu'), (500, 'relu')]
   medical_enlayers = [(100, 'softplus')]
@@ -110,6 +112,74 @@ def get_data_y(dataset):
   ydata = load_data(ytrfile)
   return (ydata,ytest)
 
+def get_mnist():
+  xtrfile = "/iesl/canvas/pedram/mnist/mnist-2q.ts.ev"
+  xtsfile = "/iesl/canvas/pedram/mnist/mnist-2q.test.ev"
+  xvalfile = "/iesl/canvas/pedram/mnist/mnist-2q.valid.ev"
+  ytrfile = "/iesl/canvas/pedram/mnist/mnist-2q.ts.data"
+  ytsfile = "/iesl/canvas/pedram/mnist/mnist-2q.test.data"
+  yvalfile = "/iesl/canvas/pedram/mnist/mnist-2q.valid.data"
+
+  xdata = load_data(xtrfile)
+  xval = load_data(xvalfile)
+  xtest = load_data(xtsfile)
+
+  ydata = load_data(ytrfile)
+  yval = load_data(yvalfile)
+  ytest = load_data(ytsfile)
+
+  return xdata, xval, xtest, ydata, yval, ytest
+
+def get_fashion():
+  xtrfile = "/iesl/canvas/pedram/fashion/fashion-2q.ts.ev"
+  xtsfile = "/iesl/canvas/pedram/fashion/fashion-2q.test.ev"
+  xvalfile ="/iesl/canvas/pedram/fashion/fashion-2q.valid.ev"
+  ytrfile = "/iesl/canvas/pedram/fashion/fashion-2q.ts.data"
+  ytsfile = "/iesl/canvas/pedram/fashion/fashion-2q.test.data"
+  yvalfile ="/iesl/canvas/pedram/fashion/fashion-2q.valid.data"
+
+  xdata = load_data(xtrfile)
+  xval = load_data(xvalfile)
+  xtest = load_data(xtsfile)
+
+  ydata = load_data(ytrfile)
+  yval = load_data(yvalfile)
+  ytest = load_data(ytsfile)
+
+  return xdata, xval, xtest, ydata, yval, ytest
+
+
+def get_7scene(crop=None):
+  path = '/iesl/canvas/jburroni/proximalDeepStructure/train/'
+  def load_image(name):
+    data_buffer = np.fromfile(path + name, dtype=np.int16)
+    img = data_buffer[2:]
+    img = img.reshape((data_buffer[0], data_buffer[1])).astype(float)
+    return np.clip(img / 5000, 0, 1)
+
+
+  def _load_dataset_from_list(list_name, path, crop=None):
+    list = pd.read_csv(path + list_name, index_col=0, names=['noisy', 'gt'], sep=' ').drop_duplicates()
+    elements = []
+
+    def accumulator(serie):
+      noisy, gt = load_image(serie[0]), load_image(serie[1])
+      if crop:
+        noisy, gt = crop(noisy, gt)
+      elements.append((noisy, gt))
+
+    list.apply(accumulator, axis=1)
+    x, y = zip(*elements)
+    return np.stack(x), np.stack(y)
+
+
+  f = lambda x: list(_load_dataset_from_list(x, path, crop))
+  xtrain, ytrain = f('train.lst')
+  xval, yval = f('val.lst')
+  xlength = np.shape(xtrain)[1]
+  ylength = np.shape(xtrain)[2]
+
+  return np.reshape(xtrain, (-1, xlength*ylength)), np.reshape(xval, (-1, xlength*ylength)),np.reshape(ytrain, (-1, xlength*ylength)),np.reshape(yval, (-1, xlength*ylength))
 
 def get_ppi(ratio):
   ffile = "/iesl/canvas/pedram/net/ppi-features-mpe.txt"

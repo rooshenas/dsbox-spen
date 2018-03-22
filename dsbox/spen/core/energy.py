@@ -37,7 +37,7 @@ class EnergyModel:
 
 
 
-  def get_feature_net_mlp(self, xinput, output_num, reuse=False):
+  def get_feature_net_mlp(self, xinput, output_num, embedding=None, reuse=False):
     net = xinput
     j = 0
     for (sz, a) in self.config.layer_info:
@@ -52,6 +52,27 @@ class EnergyModel:
                                      weights_init=tfi.variance_scaling(), bias=False,
                                     reuse=reuse, scope=("fx.h" + str(j)))
     return logits
+
+
+
+  def get_global_energy(self, xinput=None, yinput=None, embedding=None, reuse=False):
+    with tf.variable_scope(self.config.en_variable_scope) as scope:
+      j = 0
+      net = yinput
+      for (sz, a) in self.config.en_layer_info:
+        net = tflearn.fully_connected(net, sz,
+                                      weight_decay=self.config.weight_decay,
+                                      weights_init=tfi.variance_scaling(),
+                                      bias_init=tfi.zeros(), reuse=reuse, regularizer='L2',
+                                      #activation=a,
+                                      scope=("en.h" + str(j)))
+        net = tf.log( tf.exp(net) + 1.0)
+        j = j + 1
+      global_e = tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
+                                         weights_init=tfi.zeros(), bias=False,
+                                         reuse=reuse, regularizer='L2',
+                                         scope=("en.g"))
+      return tf.squeeze(global_e)
 
   def get_energy_mlp(self, xinput=None, yinput=None, embedding=None, reuse=False):
     output_size = yinput.get_shape().as_list()[-1]
@@ -74,7 +95,8 @@ class EnergyModel:
                                         scope=("en.h" + str(j)))
           #net = tflearn.dropout(net, 1.0 - self.config.dropout)
           #net = tflearn.layers.normalization.batch_normalization(net, reuse=reuse, scope=("bn.f" + str(j)))
-          net = tflearn.activations.softplus(net)
+          #net = tflearn.activations.softplus(net)
+          net = tf.log(tf.exp(net) + 1.0)
           j = j + 1
         global_e = tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
                                            weights_init=tfi.zeros(), bias=False,
@@ -88,6 +110,10 @@ class EnergyModel:
     xinput = tf.nn.embedding_lookup(embedding, xinput)
     return self.get_energy_mlp(xinput=xinput, yinput=yinput, reuse=reuse)
 
+  def get_feature_net_mlp_emb(self, xinput, output_num, embedding=None, reuse=False):
+    xinput = tf.cast(xinput, tf.int32)
+    xinput = tf.nn.embedding_lookup(embedding, xinput)
+    return self.get_feature_net_mlp(xinput, output_num, reuse)
 
   def get_energy_rnn_emb(self, xinput, yinput, embedding=None, reuse=False):
     xinput = tf.cast(xinput, tf.int32)
@@ -233,20 +259,21 @@ class EnergyModel:
 
 
 
-  def softmax_prediction_network(self, hidden_vars, reuse=False):
-    net = hidden_vars
+  def softmax_prediction_network(self, input=None, reuse=False):
+    net = input
     with tf.variable_scope(self.config.spen_variable_scope):
       with tf.variable_scope("pred") as scope:
-        net = tflearn.fully_connected(net, 100, activation='relu',
+        net = tflearn.fully_connected(net, 1000, activation='relu', regularizer='L2',
                                       weight_decay=self.config.weight_decay,
                                       weights_init=tfi.variance_scaling(),
                                       bias_init=tfi.zeros(), reuse=reuse,
                                       scope=("ph.0"))
 
-        net = tflearn.fully_connected(net, self.config.output_num*self.config.dimension, activation='softplus',
+        net = tflearn.fully_connected(net, self.config.output_num*self.config.dimension, activation='linear',
                                       weight_decay=self.config.weight_decay,
                                       weights_init=tfi.variance_scaling(),
                                       bias_init=tfi.zeros(), reuse=reuse,
+                                      regularizer='L2',
                                       scope=("ph.1"))
 
     cat_output = tf.reshape(net, (-1, self.config.output_num, self.config.dimension))
@@ -260,3 +287,73 @@ class EnergyModel:
     cat_output = tf.reshape(net, (-1, self.config.output_num, self.config.dimension))
     return tf.nn.softmax(cat_output, dim=2)
 
+
+
+
+
+  def energy_cnn_image(self, xinput=None, yinput=None, embedding=None, reuse=False):
+    image_size = tf.cast(tf.sqrt(tf.cast(tf.shape(xinput)[1], tf.float64)), tf.int32)
+    output_size = yinput.get_shape().as_list()[-1]
+    with tf.variable_scope(self.config.spen_variable_scope):
+      xinput = tf.reshape(xinput, shape=(-1, image_size, image_size) )
+      conv1 = tf.layers.conv2d(
+        inputs=tf.expand_dims(xinput, axis=3),
+        filters=8,
+        kernel_size=[3, 3],
+        padding="same",
+        name="conv1",
+        activation=tf.nn.relu, reuse=reuse)
+      conv1 = tf.nn.dropout(conv1, 1.0 - self.config.dropout)
+      pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2, name="spen/pool1")
+      conv2 = tf.layers.conv2d(
+        inputs=pool1,
+        filters=16,
+        kernel_size=[3, 3],
+        padding="same",
+        name="conv2",
+        activation=tf.nn.relu, reuse=reuse)
+      conv2 = tf.nn.dropout(conv2, 1.0 -self.config.dropout)
+      pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2, name="spen/pool2")
+
+      conv3 = tf.layers.conv2d(
+        inputs=pool2,
+        filters=32,
+        kernel_size=[3, 3],
+        padding="same",
+        name="conv3",
+        activation=tf.nn.relu, reuse=reuse)
+      conv3 = tf.nn.dropout(conv3, 1.0 - self.config.dropout)
+      pool3 = tf.layers.max_pooling2d(inputs=conv3, pool_size=[2, 2], strides=2, name="spen/pool3")
+      self.state_dim = 3200
+      self.encode_embeddings = tf.reshape(pool3, [-1, self.state_dim])
+
+      with tf.variable_scope(self.config.fx_variable_scope):
+        logits = self.get_feature_net_mlp(self.encode_embeddings, output_size, reuse=reuse)
+
+        mult = tf.multiply(logits, yinput)
+
+      local_e = tflearn.fully_connected(mult, 1, activation='linear', weight_decay=self.config.weight_decay,
+                                         weights_init=tfi.variance_scaling(),
+                                         bias=None,
+                                         bias_init=tfi.zeros(), reuse=reuse, scope="en.l")
+
+      with tf.variable_scope(self.config.en_variable_scope) as scope:
+        net = yinput
+        j = 0
+
+        for (sz, a) in self.config.en_layer_info:
+          net = tflearn.fully_connected(net, sz, activation=a,
+                                        weight_decay=self.config.weight_decay,
+                                        weights_init=tfi.variance_scaling(),
+                                        bias_init=tfi.zeros(), reuse=reuse,
+                                        scope=("en.h" + str(j)))
+          j = j + 1
+
+        global_e = tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
+                                           weights_init=tfi.zeros(),
+                                           bias_init=tfi.zeros(), reuse=reuse,
+                                           scope=("en.h" + str(j)))
+
+    net = local_e + global_e
+
+    return tf.squeeze(net)

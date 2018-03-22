@@ -16,6 +16,7 @@ class TrainingType(Enum):
   Value_Matching = 1
   SSVM = 2
   Rank_Based = 3
+  End2End = 4
 
 class SPEN:
   def __init__(self,config):
@@ -84,6 +85,31 @@ class SPEN:
 
   def get_energy(self, xinput=None, yinput=None, embedding=None, reuse=False):
     raise NotImplementedError
+
+  def end2end_training(self):
+    self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
+    self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
+    self.yp_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYP")
+    self.energy_y = self.get_energy(xinput=self.x, yinput=self.yp_ind, embedding=self.embedding)
+    current_yp_ind = self.yp_ind
+    self.objective = 0.0
+    self.yp_ar = []
+    for i in range(int(self.config.inf_iter)):
+      next_yp_ind = current_yp_ind + self.config.inf_rate * tf.gradients(self.energy_y, self.yp_ind)[0]
+      current_yp_ind = next_yp_ind
+      yp_matrix = tf.reshape(current_yp_ind, [-1, self.config.output_num, self.config.dimension])
+      yp_current = tf.nn.softmax(yp_matrix, 2)
+      yp_ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
+      l = -tf.reduce_sum(self.yt_ind * tf.log(tf.maximum(yp_ind, 1e-20)))
+      self.objective = 0.6*self.objective + 0.4*l
+      self.yp_ar.append(yp_current)
+
+    self.yp = self.yp_ar[-1] #self.get_prediction_net(input=self.h_state)
+    #self.yp_ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension], name="reshaped")
+    #self.objective = -tf.reduce_sum(self.yt_ind * tf.log( tf.maximum(self.yp_ind, 1e-20)))
+    self.train_step = self.optimizer.minimize(self.objective)
+
+
 
   def ssvm_training(self):
     self.margin_weight_ph = tf.placeholder(tf.float32, shape=[], name="Margin")
@@ -169,6 +195,8 @@ class SPEN:
       return self.ssvm_training()
     elif training_type == TrainingType.Rank_Based:
       return self.rank_based_training()
+    elif training_type == TrainingType.End2End:
+      return self.end2end_training()
     else:
       raise NotImplementedError
 
@@ -293,13 +321,36 @@ class SPEN:
 
 
 
-  def soft_predict(self, xinput=None, train=False, inf_iter=None, ascent=True):
-    self.inf_objective = self.energy_yp
-    self.inf_gradient = self.energy_ygradient
-    y_a = self.inference(xinput=xinput, inf_iter=inf_iter, train=train, ascent=ascent)
+  def soft_predict(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False):
+    tflearn.is_training(is_training=train, session=self.sess)
+    if end2end:
+      # h_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.hidden_num))
+      yp_ind_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.output_num*self.config.dimension))
+      feeddic = {self.x: xinput,
+                 self.yp_ind: yp_ind_init,
+                 self.inf_penalty_weight_ph: self.config.inf_penalty,
+                 self.dropout_ph: self.config.dropout}
+      yp = self.sess.run(self.yp, feed_dict=feeddic)
+    else:
+      self.inf_objective = self.energy_yp
+      self.inf_gradient = self.energy_ygradient
+      y_a = self.inference(xinput=xinput, inf_iter=inf_iter, train=train, ascent=ascent)
+      yp =  y_a[-1]
+    return yp
 
-
-    return y_a[-1]
+  def map_predict_trajectory(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False):
+    if end2end:
+      tflearn.is_training(train, self.sess)
+      yp_ind_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.output_num*self.config.dimension))
+      feeddic = {self.x: xinput,
+                 self.yp_ind: yp_ind_init,
+                 self.inf_penalty_weight_ph: self.config.inf_penalty,
+                 self.dropout_ph: self.config.dropout}
+      soft_yp_ar = self.sess.run(self.yp_ar, feed_dict=feeddic)
+      yp_ar = [np.argmax(yp, 2) for yp in soft_yp_ar]
+      return yp_ar
+    else:
+      raise NotImplementedError
 
   def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True):
     yp = self.soft_predict(xinput=xinput, train=train, inf_iter=inf_iter, ascent=ascent)
@@ -359,3 +410,19 @@ class SPEN:
     if verbose > 0:
       print (self.train_iter ,o,n, en_yt, en_yhat)
     return n
+
+  def train_supervised_e2e_batch(self, xbatch, ybatch, verbose=0):
+    tflearn.is_training(True, self.sess)
+    yt_ind = self.var_to_indicator(ybatch)
+    yt_ind = np.reshape(yt_ind, (-1, self.config.output_num * self.config.dimension))
+    yp_init = np.random.normal(0, 1, size=(np.shape(xbatch)[0], self.config.dimension * self.config.output_num))
+    feeddic = {self.x: xbatch, self.yt_ind: yt_ind,
+               self.yp_ind: yp_init,
+               self.learning_rate_ph: self.config.learning_rate,
+               self.inf_penalty_weight_ph: self.config.inf_penalty,
+               self.dropout_ph: self.config.dropout}
+
+    _, o = self.sess.run([self.train_step, self.objective], feed_dict=feeddic)
+    if verbose > 0:
+      print(self.train_iter, o)
+    return o
