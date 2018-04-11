@@ -86,6 +86,43 @@ class SPEN:
   def get_energy(self, xinput=None, yinput=None, embedding=None, reuse=False):
     raise NotImplementedError
 
+  def mse_loss(self, yt, yp):
+    l = tf.reduce_mean(tf.reduce_sum(tf.square(yt - yp),1))
+    return l
+
+  def ce_loss(self, yt, yp):
+    l = -tf.reduce_sum ((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1) \
+       + tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , 1e-20)), 1)) )
+    return l
+
+  def sym_f1(self, yt, yp):
+    yp = tf.reshape(yp, [-1, self.config.output_num, self.config.dimension])
+    yt = tf.reshape(yt, [-1, self.config.output_num, self.config.dimension])
+    #yp_zeros = 1.0 - tf.squeeze(yp[:, :, 0])
+    yp_ones = yp[:,:,1]
+    yt_ones = yt[:,:,1]
+    intersect = tf.reduce_sum(tf.minimum  (yt_ones, yp_ones),1)
+    return -tf.reduce_sum(intersect) + self.ce_loss(yt, yp)
+    #return (self.f1_loss(yt_ones, yp_ones)) #+ self.f1_loss(yt_zeros, yp_zeros))/2.0
+
+  def f1_loss(self, yt, yp):
+    intersect = tf.reduce_sum(tf.minimum(yt, yp),1)
+    union = tf.reduce_sum(tf.maximum(yt, yp),1)
+    return 1-tf.reduce_sum(2*intersect / (union+intersect))
+
+  def get_loss(self, yt, yp):
+    raise NotImplementedError
+
+  def biased_loss(self, yt, yp):
+    l = -tf.reduce_sum ((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1) \
+       + tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , 1e-20)), 1)) )
+    yp = tf.reshape(yp, [-1, self.config.output_num, self.config.dimension])
+    yp_zeros = yp[:, :, 0]
+    yp_ones = yp[:,:, 1]
+    en = tf.reduce_sum(yp_ones * tf.log(yp_ones), 1)
+    return l + 1.2*(tf.reduce_sum(yp_zeros) - tf.reduce_sum(yp_ones)) +  0.0*tf.reduce_sum(en)
+
+
   def end2end_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
@@ -100,8 +137,9 @@ class SPEN:
       yp_matrix = tf.reshape(current_yp_ind, [-1, self.config.output_num, self.config.dimension])
       yp_current = tf.nn.softmax(yp_matrix, 2)
       yp_ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
-      l = -tf.reduce_sum(self.yt_ind * tf.log(tf.maximum(yp_ind, 1e-20)))
-      self.objective = 0.6*self.objective + 0.4*l
+      l  = self.get_loss(self.yt_ind, yp_ind) + self.config.l2_penalty * self.get_l2_loss()
+      #l = -tf.reduce_sum(self.yt_ind * tf.log(tf.maximum(yp_ind, 1e-20)))
+      self.objective = 0.1*self.objective + 0.9*l
       self.yp_ar.append(yp_current)
 
     self.yp = self.yp_ar[-1] #self.get_prediction_net(input=self.h_state)
@@ -352,8 +390,8 @@ class SPEN:
     else:
       raise NotImplementedError
 
-  def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True):
-    yp = self.soft_predict(xinput=xinput, train=train, inf_iter=inf_iter, ascent=ascent)
+  def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False):
+    yp = self.soft_predict(xinput=xinput, train=train, inf_iter=inf_iter, ascent=ascent, end2end=end2end)
     return np.argmax(yp, 2)
 
 

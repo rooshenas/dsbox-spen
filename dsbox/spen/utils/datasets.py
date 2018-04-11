@@ -1,6 +1,26 @@
 import numpy as np
 import pickle
 import pandas as pd
+import cv2
+
+
+class RandomCrop(object):
+  "taken from https://seba-1511.github.io/tutorials/beginner/data_loading_tutorial.html"
+
+  def __init__(self, output_size):
+    assert isinstance(output_size, (int, tuple))
+    if isinstance(output_size, int):
+      self.output_size = (output_size, output_size)
+    else:
+      assert len(output_size) == 2
+      self.output_size = output_size
+
+  def __call__(self, image_left, image_right):
+    h, w = image_left.shape[:2]
+    new_h, new_w = self.output_size
+    top = np.random.randint(0, h - new_h)
+    left = np.random.randint(0, w - new_w)
+    return [image[top: top + new_h, left: left + new_w] for image in image_left, image_right]
 
 
 def get_layers(dataset):
@@ -112,7 +132,7 @@ def get_data_y(dataset):
   ydata = load_data(ytrfile)
   return (ydata,ytest)
 
-def get_mnist():
+def get_mnist_2q():
   xtrfile = "/iesl/canvas/pedram/mnist/mnist-2q.ts.ev"
   xtsfile = "/iesl/canvas/pedram/mnist/mnist-2q.test.ev"
   xvalfile = "/iesl/canvas/pedram/mnist/mnist-2q.valid.ev"
@@ -127,6 +147,41 @@ def get_mnist():
   ydata = load_data(ytrfile)
   yval = load_data(yvalfile)
   ytest = load_data(ytsfile)
+
+  return xdata, xval, xtest, ydata, yval, ytest
+
+
+def get_olivetti():
+  path = "/iesl/canvas/pedram/olivetti/olivetti.raw"
+
+  rows = []
+  for l in open(path):
+    row = np.array(map(lambda x: float(x), l.strip().split()))
+    rows.append(row)
+  images = np.stack(rows).transpose()
+  left = images[:, :2048]
+  right = images[:, 2048:]
+
+  xdata = right[0:300, :]
+  xval = right[300:350, :]
+  xtest = right[350:400, :]
+  ydata = left[0:300, :]
+  yval = left[300:350, :]
+  ytest = left[350:400, :]
+  return xdata, xval, xtest, ydata, yval, ytest
+
+def get_mnist():
+  ytrfile = "/iesl/canvas/pedram/mnist/mnist.ts.data"
+  ytsfile = "/iesl/canvas/pedram/mnist/mnist.test.data"
+  yvalfile = "/iesl/canvas/pedram/mnist/mnist.valid.data"
+
+  ydata = load_data(ytrfile)
+  yval = load_data(yvalfile)
+  ytest = load_data(ytsfile)
+
+  xdata = ydata[:]
+  xval = yval[:]
+  xtest = ytest[:]
 
   return xdata, xval, xtest, ydata, yval, ytest
 
@@ -147,6 +202,30 @@ def get_fashion():
   ytest = load_data(ytsfile)
 
   return xdata, xval, xtest, ydata, yval, ytest
+
+
+
+def load_horses():
+  path = '/iesl/canvas/pedram/WeizmannSingleScale/horses/'
+  mask_path = path + 'masks/'
+  image_path = path + 'images/'
+  images = []
+  masks = []
+  for i in range(328):
+    orig_im = cv2.imread(image_path + 'image-{}.png'.format(i))
+    orig_im = cv2.cvtColor(orig_im, cv2.COLOR_RGB2BGR)
+    low_im = cv2.resize(orig_im, dsize=(32, 32))
+    orig_mask = cv2.imread(mask_path + 'mask-{}.png'.format(i))
+    low_mask = cv2.resize(orig_mask, dsize=(32, 32))
+    low_mask = cv2.cvtColor(low_mask, cv2.COLOR_RGB2GRAY)
+    bin_mask = (low_mask > 0) + 0
+
+    images.append(low_im)
+    masks.append(bin_mask)
+
+  xall = np.reshape(np.array(images), (-1, 32 * 32 * 3))
+  yall = np.reshape(np.array(masks), (-1, 32 * 32))
+  return xall[0:200], xall[200:], yall[0:200], yall[200:]
 
 
 def get_7scene(crop=None):

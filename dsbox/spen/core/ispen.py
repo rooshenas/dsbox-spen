@@ -46,6 +46,9 @@ class SPEN:
     for v in self.spen_variables():
       print(v)
 
+    for v in self.pred_variables():
+      print(v)
+
   def spen_variables(self):
     return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen")
 
@@ -60,11 +63,11 @@ class SPEN:
     return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/fx")
 
   def pred_variables(self):
-    return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/pred")
+    return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="pred")
 
   def get_l2_loss(self):
     loss = 0.0
-    en_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.config.spen_variable_scope)
+    en_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
     for v in en_vars:
       loss += tf.nn.l2_loss(v)
     return loss
@@ -94,15 +97,53 @@ class SPEN:
   def createOptimizer(self):
     self.optimizer = tf.train.AdamOptimizer(self.learning_rate_ph)
 
-  def get_prediction_net(self, input=None, reuse=False):
+  def get_prediction_net(self, input=None, xinput=None, reuse=False):
     raise NotImplementedError
 
   def get_feature_net(self, xinput, output_num, embedding=None, reuse=False):
     raise NotImplementedError
 
+  def get_loss(self, yt, yp):
+    raise NotImplementedError
+
+  def f1_loss(self, yt, yp):
+    l = -tf.reduce_sum((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1)
+                        + 0.1*tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp, 1e-20)), 1)))
+    yp = tf.reshape(yp, [-1, self.config.output_num, self.config.dimension])
+    yt = tf.reshape(yt, [-1, self.config.output_num, self.config.dimension])
+    yp_ones = yp[:, :, 1]
+    yt_ones = yt[:, :, 1]
+    intersect = tf.reduce_sum(tf.minimum(yt_ones, yp_ones),1)
+    return -tf.reduce_sum(2*intersect / (tf.reduce_sum(yt_ones,1) +tf.reduce_sum(yp_ones,1) )) + l - 1.2*tf.reduce_sum(yp_ones)
+
+  def ce_loss(self, yt, yp):
+    l = -tf.reduce_sum ((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1) \
+       + tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , 1e-20)), 1)) )
+    return l
+
+  def mse_loss(self, yt, yp):
+    l = tf.reduce_mean( tf.square((yt-yp)*255.0))
+    return l
+
+  def biased_loss(self, yt, yp):
+    l = -tf.reduce_sum ((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1) \
+       + tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , 1e-20)), 1)) )
+    yp = tf.reshape(yp, [-1, self.config.output_num, self.config.dimension])
+    yp_zeros = yp[:, :, 0]
+    yp_ones = yp[:,:, 1]
+    en = tf.reduce_sum(yp_ones * tf.log(yp_ones), 1)
+    return l + 1.2*(tf.reduce_sum(yp_zeros) - tf.reduce_sum(yp_ones)) +  0.0*tf.reduce_sum(en)
+
+  def get_initialization_net(self, xinput, output_size, reuse=False):
+    raise NotImplementedError
+
+
   def end2end_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
+    self.yp_h = self.get_prediction_net(input=self.h, xinput=self.x)
+    #self.h = self.get_initialization_net(self.x, self.config.hidden_num)
+
     self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
     #self.h = self.get_feature_net(self.x, self.config.hidden_num, embedding=self.embedding)
 
@@ -111,25 +152,37 @@ class SPEN:
     self.energy_h = self.get_energy(xinput=self.x, yinput=self.h, embedding=self.embedding) - self.h_penalty
     h_current = self.h
     self.objective = 0.0
-    self.yp_ar = [self.get_prediction_net(input=h_current)]
+
+    self.yp_ar = [self.yp_h]
     for i in range(int(self.config.inf_iter)):
       h_next = h_current + self.config.inf_rate * tf.gradients(self.energy_h, self.h)[0]
-
-
       h_current = h_next
-      yp_current = self.get_prediction_net(input=h_current, reuse=True)
+      yp_current = self.get_prediction_net(input=h_current, xinput=self.x, reuse=True)
       ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
-      l = -tf.reduce_sum(self.yt_ind * tf.log(tf.maximum(ind, 1e-20)))
-      self.objective = 0.2*self.objective + 0.8*l
+
+      #if self.config.dimension> 1 :
+      #l = -tf.reduce_sum(self.yt_ind * tf.log(tf.maximum(ind, 1e-20)))
+      #else:
+      #l = -tf.reduce_sum ((tf.reduce_sum(self.yt_ind * tf.log(tf.maximum(ind, 1e-20)), 1) \
+      #     + tf.reduce_sum((1. - self.yt_ind) * tf.log(tf.maximum(1. - ind , 1e-20)), 1)) )
+      #l = -tf.reduce_sum( tf.log(tf.square((self.yt_ind - ind))))
+      l  = self.get_loss(self.yt_ind, ind) + self.config.l2_penalty * self.get_l2_loss()
+      #self.objective = self.objective + l / (self.config.inf_iter - i )
+      self.objective = 0.1*self.objective + 0.9 * l
       self.yp_ar.append(yp_current)
 
     #self.opjective = l
     self.h_state = h_current
-    self.yp = self.yp_ar[-1] #self.get_prediction_net(input=self.h_state)
+    if self.config.dimension > 1:
+      self.yp = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num, self.config.dimension])
+    else:
+      self.yp = self.yp_ar[-1]
+    #self.get_prediction_net(input=self.h_state)
 
     self.yp_ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension], name="reshaped")
     #self.objective = -tf.reduce_sum(self.yt_ind * tf.log( tf.maximum(self.yp_ind, 1e-20)))
     self.train_step = self.optimizer.minimize(self.objective)
+    #self.train_pred_step = self.optimizer.minimize(self.objective, var_list=self.pred_variables())
 
 
   def ssvm_training(self):
@@ -240,6 +293,7 @@ class SPEN:
 
 
   def construct(self, training_type = TrainingType.SSVM ):
+    #tf.reset_default_graph()
     if training_type == TrainingType.SSVM:
       return self.ssvm_training()
     elif training_type == TrainingType.Rank_Based:
@@ -563,15 +617,28 @@ class SPEN:
                  self.inf_penalty_weight_ph: self.config.inf_penalty,
                  self.dropout_ph: self.config.dropout}
       soft_yp_ar = self.sess.run(self.yp_ar, feed_dict=feeddic)
-      yp_ar =  [np.argmax(yp, 2) for yp in soft_yp_ar]
+      if self.config.dimension > 1:
+        yp_ar =  [np.argmax(yp, 2) for yp in soft_yp_ar]
+      else:
+        yp_ar = soft_yp_ar
       return yp_ar
     else:
       raise NotImplementedError
 
-
-  def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False):
-    yp = self.soft_predict(xinput=xinput, train=train, inf_iter=inf_iter, ascent=ascent, end2end=end2end)
+  def map_predict_h(self, xinput=None, hidden=None):
+    tflearn.is_training(False, self.sess)
+    feeddic = {self.x: xinput,
+               self.h: hidden,
+               self.dropout_ph: self.config.dropout}
+    yp = self.sess.run(self.yp_h, feed_dict=feeddic)
     return np.argmax(yp, 2)
+
+  def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False, continuous=False):
+    yp = self.soft_predict(xinput=xinput, train=train, inf_iter=inf_iter, ascent=ascent, end2end=end2end)
+    if continuous and self.config.dimension == 1:
+      return yp
+    else:
+      return np.argmax(yp, 2)
 
   #def inference_trajectory(self):
 
@@ -662,9 +729,14 @@ class SPEN:
 
   def train_supervised_e2e_batch(self, xbatch, ybatch, verbose=0):
     tflearn.is_training(True, self.sess)
-    yt_ind = self.var_to_indicator(ybatch)
-    yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+    if self.config.dimension > 1:
+      yt_ind = self.var_to_indicator(ybatch)
+      yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+    else:
+      yt_ind = ybatch
+
     h_init = np.random.normal(0, 1, size=(np.shape(xbatch)[0], self.config.hidden_num))
+
     feeddic = {self.x:xbatch, self.yt_ind: yt_ind,
                self.h: h_init,
                self.learning_rate_ph:self.config.learning_rate,

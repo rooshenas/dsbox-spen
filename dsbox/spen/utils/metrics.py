@@ -294,7 +294,7 @@ def f1_score_ar(cpred, ctrue, label_num, cut=0.5):
     if np.sum(xt) > 0:
       results.append((2.0 * intersection) / (np.sum(xp) + np.sum(xt)))
     else:
-      results.append(1.0)
+      raise ArithmeticError
   return results
 
 
@@ -304,6 +304,10 @@ def mutual_info(x, y):
   mi = normalized_mutual_info_score(x, y)
   return mi
 
+## David, instead of using 1 in the log10, he uses y_batch.max(axis=-1)
+def psnr(y_batch, y_pred):
+    rmse = ((y_batch - y_pred)**2).mean(axis=-1)**.5
+    return 20*np.log10(1/rmse)
 
 if __name__ == "__main__":
   a = np.round(np.random.uniform(0.5,1, (100,20)))
