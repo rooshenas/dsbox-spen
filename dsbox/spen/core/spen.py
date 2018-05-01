@@ -91,8 +91,10 @@ class SPEN:
     return l
 
   def ce_loss(self, yt, yp):
-    l = -tf.reduce_sum ((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1) \
-       + tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , 1e-20)), 1)) )
+    eps=1e-30
+    l = -tf.reduce_sum(yt * tf.log(tf.maximum(yp, eps))) - 0.1*tf.reduce_sum(yp * tf.log(tf.maximum(yp, eps)))
+    #l = -tf.reduce_sum ((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1) \
+    #   + tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , 1e-20)),# 1)) )
     return l
 
   def sym_f1(self, yt, yp):
@@ -137,11 +139,12 @@ class SPEN:
       yp_matrix = tf.reshape(current_yp_ind, [-1, self.config.output_num, self.config.dimension])
       yp_current = tf.nn.softmax(yp_matrix, 2)
       yp_ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
-      l  = self.get_loss(self.yt_ind, yp_ind) + self.config.l2_penalty * self.get_l2_loss()
+      l  = self.get_loss(self.yt_ind, yp_ind)
       #l = -tf.reduce_sum(self.yt_ind * tf.log(tf.maximum(yp_ind, 1e-20)))
       self.objective = 0.1*self.objective + 0.9*l
       self.yp_ar.append(yp_current)
 
+    self.objective += self.config.l2_penalty * self.get_l2_loss()
     self.yp = self.yp_ar[-1] #self.get_prediction_net(input=self.h_state)
     #self.yp_ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension], name="reshaped")
     #self.objective = -tf.reduce_sum(self.yt_ind * tf.log( tf.maximum(self.yp_ind, 1e-20)))

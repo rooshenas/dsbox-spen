@@ -162,11 +162,11 @@ def get_olivetti():
   left = images[:, :2048]
   right = images[:, 2048:]
 
-  xdata = right[0:300, :]
-  xval = right[300:350, :]
+  xdata = right[50:350, :]
+  xval = right[0:50, :]
   xtest = right[350:400, :]
-  ydata = left[0:300, :]
-  yval = left[300:350, :]
+  ydata = left[50:350, :]
+  yval = left[0:50, :]
   ytest = left[350:400, :]
   return xdata, xval, xtest, ydata, yval, ytest
 
@@ -202,6 +202,27 @@ def get_fashion():
   ytest = load_data(ytsfile)
 
   return xdata, xval, xtest, ydata, yval, ytest
+
+
+
+def get_fashion_1q():
+  xtrfile = "/iesl/canvas/pedram/fashion/fashion-1q.ts.ev"
+  xtsfile = "/iesl/canvas/pedram/fashion/fashion-1q.test.ev"
+  xvalfile ="/iesl/canvas/pedram/fashion/fashion-1q.valid.ev"
+  ytrfile = "/iesl/canvas/pedram/fashion/fashion-1q.ts.data"
+  ytsfile = "/iesl/canvas/pedram/fashion/fashion-1q.test.data"
+  yvalfile ="/iesl/canvas/pedram/fashion/fashion-1q.valid.data"
+
+  xdata = load_data(xtrfile)
+  xval = load_data(xvalfile)
+  xtest = load_data(xtsfile)
+
+  ydata = load_data(ytrfile)
+  yval = load_data(yvalfile)
+  ytest = load_data(ytsfile)
+
+  return xdata, xval, xtest, ydata, yval, ytest
+
 
 
 

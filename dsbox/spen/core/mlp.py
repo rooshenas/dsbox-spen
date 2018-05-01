@@ -13,7 +13,7 @@ class MLP:
     self.learning_rate_ph = tf.placeholder(tf.float32, shape=[], name="LearningRate")
     self.dropout_ph = tf.placeholder(tf.float32, shape=[], name="Dropout")
     self.embedding = None
-    self.y = tf.placeholder(tf.float32, shape=[None, config.output_num , self.config.dimension], name="OutputX")
+    self.y = tf.placeholder(tf.float32, shape=[None, config.output_num * self.config.dimension], name="OutputX")
 
 
   def init_embedding(self, embedding):
@@ -24,6 +24,7 @@ class MLP:
     init_op = tf.global_variables_initializer()
     self.sess = tf.Session()
     self.sess.run(init_op)
+    self.saver = tf.train.Saver()
     return self
 
 
@@ -44,7 +45,7 @@ class MLP:
     raise NotImplementedError
 
   def mse_loss(self, yt, yp):
-    l = tf.reduce_mean( tf.square(yt-yp))
+    l = tf.reduce_mean( tf.square(yt-yp)*255.0)
     return l
 
   def biased_loss(self, yt, yp):
@@ -107,7 +108,7 @@ class MLP:
 
     return tf.nn.softmax(cat_output, dim=2)
 
-  def softmax_prediction_network(self, xinput=None, reuse=False):
+  def mlp_prediction_network(self, xinput=None, reuse=False):
     net = xinput
     j = 0
     with tf.variable_scope("pred") as scope:
@@ -125,13 +126,83 @@ class MLP:
       net = tflearn.fully_connected(net, self.config.output_num * self.config.dimension, activation='linear',
                                     weight_decay=self.config.weight_decay,
                                     weights_init=tfi.variance_scaling(),
-                                    bias_init=tfi.zeros(), reuse=reuse,
+                                    reuse=reuse,
+                                    bias=False,
                                     regularizer='L2',
                                     scope=("ph.fc"))
+    if self.config.dimension == 1:
+      return tf.nn.sigmoid(net)
+    else:
+      cat_output = tf.reshape(net, (-1, self.config.output_num, self.config.dimension))
+      return tf.nn.softmax(cat_output, dim=2)
 
-    cat_output = tf.reshape(net, (-1, self.config.output_num, self.config.dimension))
 
-    return tf.nn.softmax(cat_output, dim=2)
+  def mlph_prediction_network(self, xinput=None, reuse=False):
+    hpart = xinput[:,:self.config.hidden_num]
+    xpart = xinput[:,self.config.hidden_num:]
+
+    with tf.variable_scope("hpred") as scope:
+      hnet = tflearn.fully_connected(hpart, 200, regularizer='L2', activation='relu',
+                                    weight_decay=self.config.weight_decay,
+                                    weights_init=tfi.zeros(),
+                                    bias_init=tfi.zeros(), reuse=reuse,
+                                    scope=("f.h0" ))
+
+    with tf.variable_scope("xpred") as scope:
+      xnet = tflearn.fully_connected(xpart, 1024, regularizer='L2', activation='relu',
+                                  weight_decay=self.config.weight_decay,
+                                  weights_init=tfi.variance_scaling(),
+                                  bias_init=tfi.zeros(), reuse=reuse,
+                                  scope=("f.x0"))
+    j = 0
+    net = tf.concat((hnet, xnet), axis=1)
+    with tf.variable_scope("pred") as scope:
+      for (sz, a) in self.config.pred_layer_info:
+        print (sz,a)
+        net = tflearn.fully_connected(net, sz, regularizer='L2',
+                                      weight_decay=self.config.weight_decay,
+                                      weights_init=tfi.variance_scaling(),
+                                      bias_init=tfi.zeros(), reuse=reuse,
+                                      scope=("ph." + str(j)))
+        net = tf.nn.relu(net)
+        net = tflearn.layers.dropout(net, 1 - self.config.dropout)
+        j = j + 1
+
+      net = tflearn.fully_connected(net, self.config.output_num * self.config.dimension, activation='linear',
+                                    weight_decay=self.config.weight_decay,
+                                    weights_init=tfi.variance_scaling(),
+                                    reuse=reuse,
+                                    bias=False,
+                                    regularizer='L2',
+                                    scope=("ph.fc"))
+    if self.config.dimension == 1:
+      return tf.nn.sigmoid(net)
+    else:
+      cat_output = tf.reshape(net, (-1, self.config.output_num, self.config.dimension))
+      return tf.nn.softmax(cat_output, dim=2)
+
+  def cnn_javier(self, xinput=None, reuse=False):
+        net = tf.reshape(xinput, (-1, 32, 64, 1))
+        prev_nFilter = 0
+        with tf.variable_scope("pred"):
+            for j, (nFilter, kSz, strides) in enumerate(self.config.cnn_layer_info):
+                if j == 0:
+                    net = tflearn.conv_2d(net, 1, 3, reuse=False, scope="baseline.h{}".format(j),
+                                bias=True)
+                else:
+                    net = tflearn.conv_2d(net, prev_nFilter, 3, strides=strides, reuse=False,
+                                scope="baseline.h{}".format(j), activation='relu', bias=True)
+                prev_nFilter = nFilter
+            sz = self.config.output_num
+            std = 1.0 / np.sqrt(sz)
+            probs = tflearn.fully_connected(net, sz, activation='sigmoid', weight_decay=self.config.weight_decay,
+                                             weights_init=tfi.variance_scaling(),
+                                            bias_init=tfi.zeros(),
+                                            regularizer='L2',
+                                            reuse=False,
+                                            scope=("baseline.fc"))
+        return probs
+
 
   def cnn_prediction_network(self, xinput=None, reuse=False):
 
@@ -173,13 +244,18 @@ class MLP:
         cat_output = tf.reshape(net, (-1, self.config.output_num, self.config.dimension))
         return tf.nn.softmax(cat_output, dim=2)
 
+  def get_prediction_network(self, xinput=None, reuse=False):
+    raise NotImplementedError
 
   def map_predict(self, xinput=None, train=False):
     tflearn.is_training(train, self.sess)
     yp = self.sess.run(self.yp, feed_dict={self.x: xinput})
     if self.config.loglevel > 1:
       print (yp)
-    return np.argmax(yp,2)
+    if self.config.dimension > 1:
+      return np.argmax(yp,2)
+    else:
+      return yp
 
   def pred_variables(self):
     return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
@@ -189,9 +265,16 @@ class MLP:
     self.optimizer = tf.train.AdamOptimizer(self.config.learning_rate)
 
   def construct(self):
-    self.yp = self.softmax_prediction_network(self.x)
+    self.yp = self.get_prediction_network(self.x)
     self.objective = self.get_loss(self.y, self.yp) + self.config.l2_penalty * self.get_l2_loss()
+
+
+    pred = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="pred")
+    xpred = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="xpred") +  pred
+
     self.train_step = self.optimizer.minimize(self.objective)
+    self.train_xpred = self.optimizer.minimize(self.objective, var_list=xpred)
+
     return self
 
 
@@ -212,12 +295,20 @@ class MLP:
 
   def train_batch(self, xbatch=None, ybatch=None, verbose=0):
     tflearn.is_training(True, self.sess)
-    yt_ind = self.var_to_indicator(ybatch)
-    yt_ind = np.reshape(yt_ind, (-1, self.config.output_num, self.config.dimension))
+    if self.config.dimension > 1:
+      yt_ind = self.var_to_indicator(ybatch)
+      yt_ind = np.reshape(yt_ind, (-1, self.config.output_num * self.config.dimension))
+    else:
+      yt_ind= ybatch #np.reshape(ybatch, (-1, self.config.output_num, 1))
     feeddic = {self.x:xbatch, self.y: yt_ind,
                self.learning_rate_ph:self.config.learning_rate,
                self.dropout_ph: self.config.dropout}
-    _, o = self.sess.run([self.train_step, self.objective], feed_dict=feeddic)
+    if self.train_iter < self.config.pretrain_iter:
+      _, o = self.sess.run([self.train_xpred, self.objective], feed_dict=feeddic)
+    else:
+      _, o = self.sess.run([self.train_step, self.objective], feed_dict=feeddic)
+
+
     if verbose > 0:
       print (self.train_iter ,o)
     return o
@@ -230,3 +321,10 @@ class MLP:
         k = vd[i, j]
         cat[i, j, int(k)] = 1
     return np.reshape(cat, (size[0], self.config.output_num, self.config.dimension))
+
+
+  def save(self, path):
+    self.saver.save(self.sess, path)
+
+  def restore(self, path):
+    self.saver.restore(self.sess, path)
