@@ -208,7 +208,7 @@ class SPEN:
     en = tf.reduce_sum(yp_ones * tf.log(yp_ones), 1)
     return l + 1.2*(tf.reduce_sum(yp_zeros) - tf.reduce_sum(yp_ones)) +  0.0*tf.reduce_sum(en)
 
-  def get_initialization_net(self, xinput, output_size, reuse=False):
+  def get_initialization_net(self, xinput, output_size, embedding=None, reuse=False):
     raise NotImplementedError
 
 
@@ -216,7 +216,7 @@ class SPEN:
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
     try:
-      h_start = self.get_initialization_net(self.x, self.config.hidden_num)
+      h_start = self.get_initialization_net(self.x, self.config.hidden_num, embedding=self.embedding)
     except:
       raise  NotImplementedError("Should have used init model")
 
