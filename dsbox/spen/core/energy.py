@@ -56,26 +56,55 @@ class EnergyModel:
                                     reuse=reuse, scope="fx.fc" )
     return logits
 
+  def get_init_mlp(self, xinput, output_num, embedding=None, reuse=False):
+    with tf.variable_scope("spen/init") as scope:
+
+      net = xinput
+      j = 0
+      for (sz, a) in self.config.layer_info:
+        net = tflearn.fully_connected(net, sz,
+                                      weight_decay=self.config.weight_decay,
+                                      weights_init=tfi.variance_scaling(),
+                                      bias_init=tfi.zeros(), regularizer='L2', reuse=reuse, scope=("fx.h" + str(j)))
+        #net = tflearn.layers.normalization.batch_normalization(net, reuse=reuse, scope=("bn.f" + str(j)))
+        net = tflearn.activations.relu(net)
+        net = tflearn.dropout(net, 1.0 - self.config.dropout)
+        j = j + 1
+      logits = tflearn.fully_connected(net, output_num, activation='relu', regularizer='L2',
+                                    weight_decay=self.config.weight_decay,
+                                    weights_init=tfi.variance_scaling(), bias_init=tfi.zeros(),
+                                    reuse=reuse, scope=("fx.h"+str(j) ))
+    return logits
 
 
   def get_global_energy(self, xinput=None, yinput=None, embedding=None, reuse=False):
     with tf.variable_scope(self.config.spen_variable_scope) as scope:
+      mult_ = tf.multiply(xinput, yinput)
+      local_e = tflearn.fully_connected(mult_, 1, activation='linear', regularizer='L2',
+                                     weight_decay=self.config.weight_decay,
+                                     bias=False,
+                                     weights_init=tfi.variance_scaling(),
+                                     reuse=reuse, scope=("en.l"))
+    #local_e = self.config.inf_penalty * tf.reduce_sum(tf.square(yinput-xinput),1)
+    #local_e = self.config.inf_penalty * tf.reduce_sum(tf.square(yinput))
+    with tf.variable_scope(self.config.spen_variable_scope) as scope:
       j = 0
+      #net = tf.concat((yinput, xinput), axis=1)
       net = yinput
       for (sz, a) in self.config.en_layer_info:
         net = tflearn.fully_connected(net, sz,
                                       weight_decay=self.config.weight_decay,
                                       weights_init=tfi.variance_scaling(),
                                       bias_init=tfi.zeros(), reuse=reuse, regularizer='L2',
-                                      #activation=a,
                                       scope=("en.h" + str(j)))
-        net = tf.log( tf.exp(net) + 1.0)
+        net = tf.log( tf.exp(net) + self.config.temperature)
         j = j + 1
+        #net = tf.contrib.layers.layer_norm(net, reuse=reuse, scope=("ln"+str(j)))
       global_e = tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
                                          weights_init=tfi.zeros(), bias=False,
                                          reuse=reuse, regularizer='L2',
                                          scope=("en.g"))
-      return tf.squeeze(global_e)
+      return tf.squeeze(global_e+local_e)
 
   def get_energy_mlp(self, xinput=None, yinput=None, embedding=None, reuse=False):
     output_size = yinput.get_shape().as_list()[-1]
@@ -103,6 +132,7 @@ class EnergyModel:
           #net = tflearn.activations.softplus(net)
           net = tf.log(tf.exp(net) + self.config.temperature)
           #net = tflearn.dropout(net, 1.0 - self.config.dropout)
+          #net = tf.contrib.layers.layer_norm(net, reuse=reuse, scope=("ln"+str(j)))
           j = j + 1
         global_e = tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
                                            weights_init=tfi.variance_scaling(), bias=False,
@@ -309,11 +339,36 @@ class EnergyModel:
       net = tflearn.fully_connected(net, self.config.output_num*self.config.dimension, activation='linear',
                                       weight_decay=self.config.weight_decay,
                                       weights_init=tfi.variance_scaling(),
-                                      bias_init=tfi.zeros(), reuse=reuse,
+                                      bias=False,
+                                      reuse=reuse,
                                       regularizer='L2',
                                       scope=("ph.fc"))
 
     return tf.nn.sigmoid(net)
+
+  def linear_prediction_network(self, input=None, xinput=None, reuse=False):
+    net = input
+    j = 0
+    with tf.variable_scope("pred") as scope:
+      for (sz, a) in self.config.pred_layer_info:
+        net = tflearn.fully_connected(net, sz, regularizer='L2',
+                                      weight_decay=self.config.weight_decay,
+                                      weights_init=tfi.variance_scaling(),
+                                      bias_init=tfi.zeros(), reuse=reuse,
+                                      scope=("ph." + str(j)))
+        net = tf.nn.relu(net)
+        net = tflearn.layers.dropout(net, 1 - self.config.dropout)
+        j = j + 1
+
+      net = tflearn.fully_connected(net, self.config.output_num * self.config.dimension, activation='linear',
+                                    weight_decay=self.config.weight_decay,
+                                    weights_init=tfi.variance_scaling(),
+                                    bias=False,
+                                    reuse=reuse,
+                                    regularizer='L2',
+                                    scope=("ph.fc"))
+
+    return net
 
 
   def sigmoid2_prediction_network(self, input=None, xinput=None, reuse=False):
