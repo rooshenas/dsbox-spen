@@ -205,45 +205,52 @@ class SPEN:
   def end2end_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
-    #self.h0 = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput0")
-    #self.h = self.get_initialization_net(self.x, self.config.hidden_num)
-    self.yp_h  = self.get_prediction_net(input=self.h, xinput=self.x)
+    try:
+      h_start = self.get_initialization_net(self.x, self.config.hidden_num)
+    except:
+      self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
+      h_start = self.h
+    #except:
+    #  raise  NotImplementedError("Should have used init model")
+
+    #self.yp_h  = self.get_prediction_net(input=tf.concat((h_start, h_start), axis=1), xinput=self.x)
 
 
     self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
     #self.h = self.get_feature_net(self.x, self.config.hidden_num, embedding=self.embedding)
 
-    self.h_penalty =   self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(self.h),1)
-    self.avg_h = tf.reduce_mean(tf.square(self.h))
-    self.energy_h = self.get_energy(xinput=self.x, yinput=self.h, embedding=self.embedding) - self.h_penalty
-    h_current = self.h
+    self.h_penalty =  self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(h_start),1)
+    self.avg_h = tf.reduce_mean(tf.square(h_start))
+    #self.energy_h = self.get_energy(xinput=self.x, yinput=self.h, embedding=self.embedding) - self.h_penalty
+    h_current = h_start
     self.objective = 0.0
+    self.h_ar = [h_start]
 
-    self.yp_ar = [self.yp_h]
+    self.yp_ar = []
     self.en_ar = []
     self.g_ar = []
     self.pen_ar = []
+    #self.objective = self.get_loss(self.yt_ind, self.yp_h)
     for i in range(int(self.config.inf_iter)):
-      penalty_current = self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(h_current),1)
-      energy_current = self.get_energy(xinput=self.x, yinput=h_current, embedding=None, reuse=True) - penalty_current
+      #penalty_current = self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(h_current),1)
+      energy_current = self.get_energy(xinput=self.x, yinput=h_current, embedding=self.embedding, reuse=False if i == 0 else True) #- penalty_current
       g = tf.gradients(energy_current, h_current)[0]
       self.en_ar.append(energy_current)
       self.g_ar.append(g)
-      self.pen_ar.append(penalty_current)
-      #noise = tf.random_normal(shape=tf.shape(g),stddev=self.config.noise_rate*tf.norm(g)/tf.sqrt(tf.cast(i, tf.float32) + 1.0))
+      #self.pen_ar.append(penalty_current)
+      noise = tf.random_normal(shape=tf.shape(g),stddev=self.config.noise_rate*tf.norm(g)/tf.sqrt(tf.cast(i, tf.float32) + 1.0))
 
-      h_next = h_current + self.config.inf_rate * g #(self.config.inf_rate/tf.sqrt(tf.cast(i, tf.float32) + 1.0)) * tf.cond(self.is_training > 0.0, lambda: g, lambda: g)
+      h_next = h_current + self.config.inf_rate * (self.config.inf_rate/tf.sqrt(tf.cast(i, tf.float32) + 1.0)) * tf.cond(self.is_training > 0.0, lambda: g+noise, lambda: g)
       h_current = h_next
-
-      yp_current  = self.get_prediction_net(input=h_current, xinput=self.x, reuse=True)
+      h_extend = tf.concat ((h_current, h_start), axis=1)
+      yp_current  = self.get_prediction_net(input=h_extend, xinput=self.x, reuse=False if i == 0 else True)
       ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
       l  = self.get_loss(self.yt_ind, ind)
-
+      self.h_ar.append(h_current)
       self.objective = (1.0 - self.config.alpha) * self.objective + self.config.alpha * l
       self.yp_ar.append(yp_current)
 
     #self.opjective = l
-    self.h_state = h_current
     self.objective +=  self.config.l2_penalty * self.get_l2_loss()
     if self.config.dimension > 1:
       self.yp = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num, self.config.dimension])
@@ -647,6 +654,17 @@ class SPEN:
     return h
 
 
+  def h_trajectory(self, xinput=None, train=False, inf_iter=None, ascent=True):
+    tflearn.is_training(is_training=train, session=self.sess)
+    h_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.hidden_num))
+    feeddic = {self.x: xinput,
+                 self.h: h_init,
+                 self.inf_penalty_weight_ph: self.config.inf_penalty,
+                 self.is_training : 1.0 if train else 0.0,
+                 self.dropout_ph: self.config.dropout}
+    h_ar = self.sess.run(self.h_ar ,feed_dict=feeddic)
+    return h_ar
+
   def soft_predict(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False):
     tflearn.is_training(is_training=train, session=self.sess)
     if end2end:
@@ -836,22 +854,21 @@ class SPEN:
 
 
 
-    if self.train_iter < self.config.pretrain_iter: #% 2 == 0 : # < self.config.pretrain_iter:
+    if self.train_iter % 2 == 0 : # < self.config.pretrain_iter:
       _, o = self.sess.run([self.train_pred_step, self.objective], feed_dict=feeddic)
-
-
 
     else:
       if self.config.pretrain_iter < 0:
-        _, o, en_ar, g_ar = self.sess.run(
-          [self.train_all_step, self.objective, self.en_ar, self.g_ar], feed_dict=feeddic)
+        _, o, en_ar, g_ar, h_ar = self.sess.run(
+          [self.train_all_step, self.objective, self.en_ar, self.g_ar, self.h_ar], feed_dict=feeddic)
+
       else:
-        _, o,en_ar, g_ar  = self.sess.run([self.train_step, self.objective, self.en_ar, self.g_ar], feed_dict=feeddic)
+        _, o,en_ar, g_ar, h_ar  = self.sess.run([self.train_step, self.objective, self.en_ar, self.g_ar, self.h_ar], feed_dict=feeddic)
 
       if verbose > 0:
         print ("---------------------------------------------------------")
         for k in range(self.config.inf_iter):
-          print (np.average(np.linalg.norm(g_ar[k], axis=1)), np.average(en_ar[k]))
+          print (np.average(np.linalg.norm(g_ar[k], axis=1)), np.average(np.linalg.norm(h_ar[k], axis=1)), np.average(en_ar[k]),)
     return o
 
 
