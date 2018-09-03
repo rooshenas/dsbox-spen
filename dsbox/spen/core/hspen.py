@@ -26,7 +26,10 @@ class SPEN:
     self.learning_rate_ph = tf.placeholder(tf.float32, shape=[], name="LearningRate")
     self.is_training = tf.placeholder(tf.float32, shape=[], name="IsTraining")
     self.dropout_ph = tf.placeholder(tf.float32, shape=[], name="Dropout")
+    self.bs_ph = tf.placeholder(tf.int32, shape=[], name="BatchSize")
+
     self.embedding=None
+    self.train_iter = 0.0
 
 
   def init(self):
@@ -127,13 +130,14 @@ class SPEN:
     return -tf.reduce_sum(2*intersect / (tf.reduce_sum(yt_ones,1) +tf.reduce_sum(yp_ones,1) )) + l - 1.2*tf.reduce_sum(yp_ones)
 
   def ce_loss(self, yt, yp):
-    eps = 1e-30
+    eps = 1e-20
     #ypc = tf.reshape(yp, (-1, self.config.output_num, self.config.dimension))
     #yp = tf.clip_by_value(yp, clip_value_min=eps, clip_value_max=1.0 - eps )
     #ytc = tf.reshape(yt, (-1, self.config.output_num, self.config.dimension))
     #l =  tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=yt, logits=yp))
-    l = -tf.reduce_sum(yt * tf.log(tf.maximum(yp, eps))) #\
-                #     -tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , eps)))
+    if self.config.dimension > 1:
+      yp = tf.reshape(yp, (-1, self.config.output_num*self.config.dimension))
+    l = -tf.reduce_sum(yt * tf.log(tf.maximum(yp, eps))) - tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , eps)))
     #if self.config.dimension == 1:
     #  self.syp = tf.reduce_mean(yp)
     #  self.syp_t = tf.reduce_mean(yp)
@@ -162,7 +166,7 @@ class SPEN:
 
   def ce_sym_loss_b(self, yt, yp):
     l = -tf.reduce_sum((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1) \
-                        + 0.001*tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp, 1e-20)), 1)))
+                        + 0.0001*tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp, 1e-20)), 1)))
     return l
 
   def ce_en_loss(self, yt, yp):
@@ -181,11 +185,7 @@ class SPEN:
 
     return l
 
-  def iou_loss(self, yt, yp):
-    intersect = tf.reduce_sum(tf.minimum(yt, yp),1)
-    union = tf.reduce_sum(tf.maximum(yt, yp),1)# + 1e-20
-    print tf.shape(union)
-    return -tf.reduce_sum(intersect/ union)
+
 
   def mse_loss(self, yt, yp):
     #yt_max = tf.cast(tf.argmax(tf.reshape(yt, (-1, self.config.output_num, self.config.dimension)), axis=2), tf.float32)
@@ -208,32 +208,140 @@ class SPEN:
     en = tf.reduce_sum(yp_ones * tf.log(yp_ones), 1)
     return l + 1.2*(tf.reduce_sum(yp_zeros) - tf.reduce_sum(yp_ones)) +  0.0*tf.reduce_sum(en)
 
+  def biased_horses_loss(self, yt, yp):
+    l = -tf.reduce_sum ((tf.reduce_sum(yt * tf.log(tf.maximum(yp, 1e-20)), 1) \
+       + tf.reduce_sum((1. - yt) * tf.log(tf.maximum(1. - yp , 1e-20)), 1)) )
+    intersect = tf.reduce_sum(tf.multiply(yt, yp))
+    union = tf.reduce_sum(yt) + tf.reduce_sum(yp) - intersect
+    #intersect = tf.reduce_sum(tf.minimum(yt, yp))
+    #union = tf.reduce_sum(tf.maximum(yt, yp))  # + 1e-20
+    return l + union - intersect
+
   def get_initialization_net(self, xinput, output_size, embedding=None, reuse=False):
     raise NotImplementedError
+
+
+
+  def iou_loss2(self,yt, yp):
+    intersection = tf.reduce_sum(tf.minimum(yp,yt),1)
+    union = tf.reduce_sum(tf.maximum(yp, yt),1)
+    iou = tf.divide(intersection, union)
+    loss = tf.subtract(tf.constant(1.0, dtype=tf.float32), iou)
+    return 100*loss
+
+  def iou_loss(self, yt, yp):
+    # code from here
+    # http://angusg.com/writing/2016/12/28/optimizing-iou-semantic-segmentation.html
+    # logits = tf.reshape(yp, [-1])
+    # trn_labels = tf.reshape(yt, [-1])
+    logits = yt
+    trn_labels = yp
+    '''
+    Eq. (1) The intersection part - tf.mul is element-wise, 
+    if logits were also binary then tf.reduce_sum would be like a bitcount here.
+    '''
+    inter = tf.reduce_sum(tf.multiply(logits, trn_labels), 1)
+
+    '''
+    Eq. (2) The union part - element-wise sum and multiplication, then vector sum
+    '''
+    union = tf.reduce_sum(tf.subtract(tf.add(logits, trn_labels), tf.multiply(logits, trn_labels)), 1)
+
+    # Eq. (4)
+    loss = tf.subtract(tf.constant(1.0, dtype=tf.float32), tf.div(inter, union))
+
+    return 1000*loss  # tf.div(inter, union)
+
+  def end2end_training_o(self):
+    def body(h, g, iter, obj, yp):
+      penalty_current = self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(h),1)
+      energy_current = self.get_energy(xinput=self.features, yinput=h, embedding=None, reuse=True) - penalty_current
+      g = tf.gradients(energy_current, h)[0]
+      g = tf.clip_by_value(g, clip_value_min=-0.1, clip_value_max=0.1)
+      h_next = h_current  + self.config.inf_rate * g
+      yp_current = self.get_prediction_net(input=h_current, xinput=self.x, reuse=True)
+      ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
+      l = self.get_loss(self.yt_ind, ind)
+      obj += (self.config.alpha / (self.config.inf_iter - iter + 1.0)) * l
+      return [h_next, g, tf.add(iter,1.0), obj,yp_current]
+
+    def cond(h,g, iter, obj, yp):
+      #return tf.less(iter, tf.constant(5.0))
+      return tf.reduce_any(tf.logical_and(tf.greater(tf.norm(g), tf.constant(0.1)),tf.less(iter, 10.0)) )
+
+
+
+    self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
+    self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
+    noinit = False
+    try:
+      h_start, features = self.get_initialization_net(self.x, self.config.hidden_num, embedding=self.embedding)
+    except:
+      h_start = self.h
+      print ("no init network")
+      noinit = True
+      #raise  NotImplementedError("Should have used init model")
+    self.features = features
+    self.yp_h = self.get_prediction_net(input=h_start, xinput=self.x)
+    self.energy_h = self.get_energy(xinput=features, yinput=h_start, embedding=None)
+    self.yp_hpredict = self.get_prediction_net(input=self.h, xinput=self.x, reuse=True)
+    self.yt_ind = tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
+
+    self.h_penalty =  self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(self.h - h_start),1)
+    self.objective = 0.0
+
+
+    h_current = h_start #+ self.h
+    self.objective = 0.0 #self.get_loss(self.yt_ind, self.yp_h)
+    h, g, iter, obj, yp_l = tf.while_loop(cond, body, [h_start, h_start, 0.0, 0.0, self.yp_h])
+    self.iter = iter
+    self.g_ar  = [tf.norm(g)]
+    self.objective = obj + self.config.l2_penalty * self.get_l2_loss()
+    self.yp_ar = [ yp_l]
+    self.h_ar = [tf.norm(h)]
+    if self.config.dimension > 1:
+      self.yp = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num, self.config.dimension])
+    else:
+      self.yp = self.yp_ar[-1]
+
+    self.train_all_step = self.optimizer.minimize(self.objective)
+    self.train_step = self.optimizer.minimize(self.objective, var_list=self.spen_variables())
+
 
 
   def end2end_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
+    noinit = False
     try:
-      h_start = self.get_initialization_net(self.x, self.config.hidden_num, embedding=self.embedding)
+      h_start, features = self.get_initialization_net(self.x, self.config.hidden_num, embedding=self.embedding)
     except:
-      raise  NotImplementedError("Should have used init model")
+      h_start = self.h
+      print ("no init network")
+      noinit = True
+      #raise  NotImplementedError("Should have used init model")
+
 
     #self.yp_h  = self.get_prediction_net(input=tf.concat((h_start, tf.zeros(h_start.get_shape())), axis=1), xinput=self.x)
-    self.yp_h = self.get_prediction_net(input=h_start, xinput=self.x)
-    self.yp_hpredict = self.get_prediction_net(input=self.h, xinput=self.x, reuse=True)
+    self.yp_h = self.get_prediction_net(input=(h_start), xinput=self.x)
+    if self.config.dimension == 1:
+      self.yp_hpredict = tf.nn.sigmoid(self.get_prediction_net(input=self.h, xinput=self.x, reuse=True))
+    else:
+      logits = self.get_prediction_net(input=self.h, xinput=self.x, reuse=True)
+      logits = tf.reshape(logits, (-1, self.config.output_num, self.config.dimension))
+      self.yp_hpredict = tf.nn.softmax(logits)
+
     self.yt_ind = tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
     #self.h = self.get_feature_net(self.x, self.config.hidden_num, embedding=self.embedding)
 
     self.h_penalty =  self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(self.h - h_start),1)
     #self.avg_h = tf.reduce_mean(tf.square(h_start))
-    self.energy_h = self.get_energy(xinput=h_start, yinput=self.h, embedding=self.embedding) - self.h_penalty
-    self.energy_hgradient = tf.gradients(self.energy_h, self.h)[0]
+    #self.energy_h = self.get_energy(xinput=h_start, yinput=self.h, embedding=self.embedding) - self.h_penalty
+    #self.energy_hgradient = tf.gradients(self.energy_h, self.h)[0]
 
-    h_current = h_start
+
     self.objective = 0.0
-    self.h_ar = [h_start]
+
 
     self.yp_ar = [self.yp_h]
     self.en_ar = []
@@ -242,43 +350,77 @@ class SPEN:
     self.l_ar = []
     h_total = (1.0 / (self.config.inf_iter+1) ) * h_start
     k = (1.0 / (self.config.inf_iter+1) )
-    self.objective = self.get_loss(self.yt_ind, self.yp_h)
+    #hnoise = tf.random_normal(shape=(self.bs_ph, self.config.hidden_num), mean=0.0, stddev=tf.norm(h_start, 1))
+    h_current = h_start# + hnoise
+
+    self.h_ar = [h_current]
+    self.objective = 0.0 #self.get_loss(self.yt_ind, self.yp_h)]]
+    en_total = 0.0
     for i in range(int(self.config.inf_iter)):
-      penalty_current = self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(h_current-h_start),1)
-      energy_current = self.get_energy(xinput=h_start, yinput=h_current, embedding=None, reuse=True) - penalty_current
+      #tf.square(tf.norm(h_current, axis=1) - 1)
+      penalty_current = self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(h_current),1)
+      energy_current = self.get_energy(xinput=self.x if noinit else features, yinput=h_current, embedding=None, reuse=True if i > 0 else False) - penalty_current
       g = tf.gradients(energy_current, h_current)[0]
+      g = tf.clip_by_value(g, clip_value_min=-1.0, clip_value_max=1.0)
+      en_total += energy_current
       self.en_ar.append(energy_current)
-      self.g_ar.append(g)
+      self.g_ar.append(tf.reduce_mean(tf.norm(g,1)))
 
       #self.pen_ar.append(penalty_current)
-      noise = tf.random_normal(shape=tf.shape(g),stddev=self.config.noise_rate*tf.norm(g)/tf.sqrt(tf.cast(i, tf.float32) + 1.0))
+      #noise = tf.random_normal(shape=tf.shape(g),stddev=self.config.noise_rate*tf.norm(g)/tf.sqrt(tf.cast(i, tf.float32) + 1.0))
+      noise = tf.random_normal(shape=tf.shape(g),stddev=self.config.noise_rate*tf.norm(g))
 
-      h_next = h_current + self.config.inf_rate * (self.config.inf_rate/tf.sqrt(tf.cast(i, tf.float32) + 1.0)) * tf.cond(self.is_training > 0.0, lambda: g+noise, lambda: g)
-      h_current = h_next
+      h_next = h_current  + (self.config.inf_rate)* tf.cond(self.is_training > 0.0, lambda: g+noise, lambda: g)
+      #h_next = h_current  + self.config.inf_rate * (self.config.inf_rate/tf.sqrt(tf.cast(i, tf.float32) + 1.0)) * tf.cond(self.is_training > 0.0, lambda: g+noise, lambda: g)
+      h_current = h_next #+ 0.001*tf.random_normal(shape=(self.bs_ph, self.config.hidden_num), mean=0.0, stddev=tf.norm(h_current,1))
       #h_total += h_current
       #h_extend = tf.concat ((h_current, h_start), axis=1)
-      yp_current  = self.get_prediction_net(input=h_current, xinput=self.x, reuse=True)
+      #h_normal = tf.nn.softmax(h_current)
+      yp_current_logits  = self.get_prediction_net(input=h_current, xinput=self.x, reuse=True)
+
+      if self.config.dimension == 1:
+        yp_current = tf.nn.sigmoid(yp_current_logits)
+        #l = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=yp_current_logits, labels=self.yt_ind))
+        eps=1e-10
+        #yp_current = yp_current_logits
+        #yp_current = tf.clip_by_value(yp_current_logits, clip_value_min=eps, clip_value_max=1-eps)
+
+      else:
+        yp_current_logits = tf.reshape(yp_current_logits, (-1, self.config.output_num, self.config.dimension))
+        yp_current = tf.nn.softmax(yp_current_logits, dim=2)
+        #l = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(
+        #    logits=yp_current_logits,
+        #    labels=tf.reshape(self.yt_ind, (-1, self.config.output_num, self.config.dimension))))
+
       ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
       l  = self.get_loss(self.yt_ind, ind)
-      self.l_ar.append(l)
+      #l = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=yp_current_logits, labels=self.yt_ind))
+      self.l_ar.append(tf.reduce_mean(l))
+     # self.h_ar.append(h_normal)
       self.h_ar.append(h_current)
       #yp_total += yp_current
       #self.objective = (1.0 - self.config.alpha) * self.objective + self.config.alpha * l
-      self.objective += (self.config.alpha / (self.config.inf_iter - i + 1.0)) * l
-      h_total += (self.config.alpha / (self.config.inf_iter - i + 1.0)) * h_current
-      k += (self.config.alpha / (self.config.inf_iter - i + 1.0))
+      #self.objective += (self.config.alpha / (self.config.inf_iter - i)) * l
+      #h_total += (self.config.alpha / (self.config.inf_iter - i + 1.0)) * h_current
+      #k += (self.config.alpha / (self.config.inf_iter - i + 1.0))
       self.yp_ar.append(yp_current)
 
     #ind = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num * self.config.dimension])
     #l  = self.get_loss(self.yt_ind, ind)
+    #self.objective = self.get_loss(self.yt_ind, )
+    #ind = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num * self.config.dimension])
+    #l = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=yp_current_logits, labels=self.yt_ind))
+    #self.objective = self.get_loss(self.yt_ind, ind) + self.config.l2_penalty * self.get_l2_loss()
+    self.objective = tf.reduce_sum(l) + self.config.l2_penalty * self.get_l2_loss() + self.ce_loss(self.yt_ind, ind)
 
-    self.objective += self.config.l2_penalty * self.get_l2_loss()
+    self.yp = self.yp_ar[-1]
+    #if self.config.dimension > 1:
+    #  self.yp = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num, self.config.dimension])
+    #else:
+    #  self.yp = self.yp_ar[-1]
 
-    if self.config.dimension > 1:
-      self.yp = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num, self.config.dimension])
-    else:
-      self.yp = self.get_prediction_net(input=(h_total / k), xinput=self.x, reuse=True)
-      #self.yp = self.yp_ar[-1]#self.get_prediction_net(h_total / self.config.inf_it)
+      #self.yp = self.get_prediction_net(input=(h_total / k), xinput=self.x, reuse=True)
+      #self.yp = self.get_prediction_net(h_total / self.config.inf_it)
       #yp_ar = np.array(self.yp_ar)
       #self.yp = tf.reduce_mean(self.yp_ar, axis=-1)
     #self.get_prediction_net(input=self.h_state)
@@ -293,97 +435,97 @@ class SPEN:
     self.train_all_step = self.optimizer.minimize(self.objective)
     self.train_step = self.optimizer.minimize(self.objective, var_list=self.spen_variables())
 
-    init_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/init")
-    fc_var =  tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="pred")
-    spen_e_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/fx")
-    spen_fx_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/en")
+    #init_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/init")
+    #fc_var =  tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="pred")
+    #spen_e_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/fx")
+    #spen_fx_var = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/en")
 
     #self.train_pre_step = self.optimizer.minimize(self.obj_mlp, var_list=(init_var+fc_var))
-    #self.train_post_step = self.optimizer.minimize(self.objective, var_list=(spen_e_var+spen_fx_var+fc_var))
+    #self.train_post_step = self.optimizer.minimize(self.objective, var_list=(spen_e_var+spen_fx_var+init_var))
 
-    self.train_pred_step = self.optimizer.minimize(self.objective, var_list=self.pred_variables())
+    #self.train_pred_step = self.optimizer.minimize(self.objective, var_list=self.pred_variables())
 
-  def end2end_training2(self):
-    self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
-    self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
-    try:
-      h_start = self.get_initialization_net(self.x, self.config.hidden_num)
-    except:
-      raise NotImplementedError("Should have used init model")
-
-    # self.yp_h  = self.get_prediction_net(input=tf.concat((h_start, tf.zeros(h_start.get_shape())), axis=1), xinput=self.x)
-    self.yp_h = self.get_prediction_net(input=h_start, xinput=self.x)
-
-    self.yt_ind = tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension],
-                                 name="OutputYT")
-    # self.h = self.get_feature_net(self.x, self.config.hidden_num, embedding=self.embedding)
-
-    self.h_penalty = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(h_start), 1)
-    self.avg_h = tf.reduce_mean(tf.square(h_start))
-    # self.energy_h = self.get_energy(xinput=self.x, yinput=self.h, embedding=self.embedding) - self.h_penalty
-    h_current = h_start
-    self.objective = 0.0
-    self.h_ar = [h_start]
-
-    self.yp_ar = [self.yp_h]
-    self.en_ar = []
-    self.g_ar = []
-    self.pen_ar = []
-    h_total = h_start + 0.0
-    k = 0.0
-    self.objective = self.get_loss(self.yt_ind, self.yp_h)
-    for i in range(int(self.config.inf_iter)):
-      penalty_current = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(h_current-h_start), 1)
-      energy_current = self.get_energy(xinput=h_start, yinput=h_current, embedding=None,
-                                       reuse=False if i == 0 else True) - penalty_current
-      g = tf.gradients(energy_current, h_current)[0]
-      self.en_ar.append(energy_current)
-      self.g_ar.append(g)
-
-      # self.pen_ar.append(penalty_current)
-      noise = tf.random_normal(shape=tf.shape(g),
-                               stddev=self.config.noise_rate * tf.norm(g) / tf.sqrt(tf.cast(i, tf.float32) + 1.0))
-
-      h_next = h_current + self.config.inf_rate * (
-      self.config.inf_rate / tf.sqrt(tf.cast(i, tf.float32) + 1.0)) * tf.cond(self.is_training > 0.0, lambda: g + noise,
-                                                                              lambda: g)
-      h_current = h_next
-      #if k>10:
-      h_total += h_current
-      k += 1.0
-      # h_extend = tf.concat ((h_current, h_start), axis=1)
-      #yp_current = self.get_prediction_net(input=h_current, xinput=self.x, reuse=True)
-
-      self.h_ar.append(h_current)
-      # self.objective = (1.0 - self.config.alpha) * self.objective + self.config.alpha * l
-      #self.objective += (self.config.alpha / (self.config.inf_iter - i + 1.0)) * l
-      #self.yp_ar.append(yp_current)
-      #yp_current = self.yp = self.get_prediction_net(input=(h_total/(self.config.inf_iter+0.0)), xinput=self.x, reuse=True)
-
-
-    self.yp = self.get_prediction_net(input=(h_total/k), xinput=self.x, reuse=True)
-    ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension])
-    l = self.get_loss(self.yt_ind, ind)
-
-    self.objective = l + self.config.l2_penalty * self.get_l2_loss()
-    #if self.config.dimension > 1:
-    #  self.yp = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num, self.config.dimension])
-    #else:
-    #  self.yp = self.yp_ar[-1] # self.get_prediction_net(h_total / self.config.inf_it)
-    # self.get_prediction_net(input=self.h_state)
-
-    # self.yp_ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension], name="reshaped")
-    # self.objective = -tf.reduce_sum(self.yt_ind * tf.log( tf.maximum(self.yp_ind, 1e-20)))
-    self.train_all_step = self.optimizer.minimize(self.objective)
-    self.train_step = self.optimizer.minimize(self.objective, var_list=self.spen_variables())
-
-    # self.yp_mlp = self.get_prediction_net(input=self.h0, xinput=self.x, reuse=True)
-    # self.objective_mlp = self.get_loss(self.yt_ind, self.yp_mlp) + self.config.l2_penalty * self.get_l2_loss()
-    self.train_pred_step = self.optimizer.minimize(self.objective, var_list=self.pred_variables())
-    # predxh = self.predh_variables() + self.predx_variables()
-    # hspen = self.predh_variables() + self.spen_variables()
-    # self.train_hspen_step = self.optimizer.minimize(self.objective, var_list=hspen)
-    # self.train_predhx_step = self.optimizer.minimize(self.objective, var_list=predxh)
+  # def end2end_training2(self):
+  #   self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
+  #   self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
+  #   try:
+  #     h_start = self.get_initialization_net(self.x, self.config.hidden_num)
+  #   except:
+  #     raise NotImplementedError("Should have used init model")
+  #
+  #   # self.yp_h  = self.get_prediction_net(input=tf.concat((h_start, tf.zeros(h_start.get_shape())), axis=1), xinput=self.x)
+  #   self.yp_h = self.get_prediction_net(input=h_start, xinput=self.x)
+  #
+  #   self.yt_ind = tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension],
+  #                                name="OutputYT")
+  #   # self.h = self.get_feature_net(self.x, self.config.hidden_num, embedding=self.embedding)
+  #
+  #   self.h_penalty = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(h_start), 1)
+  #   self.avg_h = tf.reduce_mean(tf.square(h_start))
+  #   # self.energy_h = self.get_energy(xinput=self.x, yinput=self.h, embedding=self.embedding) - self.h_penalty
+  #   h_current = h_start
+  #   self.objective = 0.0
+  #   self.h_ar = [h_start]
+  #
+  #   self.yp_ar = [self.yp_h]
+  #   self.en_ar = []
+  #   self.g_ar = []
+  #   self.pen_ar = []
+  #   h_total = h_start + 0.0
+  #   k = 0.0
+  #   self.objective = self.get_loss(self.yt_ind, self.yp_h)
+  #   for i in range(int(self.config.inf_iter)):
+  #     penalty_current = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(h_current-h_start), 1)
+  #     energy_current = self.get_energy(xinput=h_start, yinput=h_current, embedding=None,
+  #                                      reuse=False if i == 0 else True) - penalty_current
+  #     g = tf.gradients(energy_current, h_current)[0]
+  #     self.en_ar.append(energy_current)
+  #     self.g_ar.append(g)
+  #
+  #     # self.pen_ar.append(penalty_current)
+  #     noise = tf.random_normal(shape=tf.shape(g),
+  #                              stddev=self.config.noise_rate * tf.norm(g) / tf.sqrt(tf.cast(i, tf.float32) + 1.0))
+  #
+  #     h_next = h_current + self.config.inf_rate * (
+  #     self.config.inf_rate / tf.sqrt(tf.cast(i, tf.float32) + 1.0)) * tf.cond(self.is_training > 0.0, lambda: g + noise,
+  #                                                                             lambda: g)
+  #     h_current = h_next
+  #     #if k>10:
+  #     h_total += h_current
+  #     k += 1.0
+  #     # h_extend = tf.concat ((h_current, h_start), axis=1)
+  #     #yp_current = self.get_prediction_net(input=h_current, xinput=self.x, reuse=True)
+  #
+  #     self.h_ar.append(h_current)
+  #     # self.objective = (1.0 - self.config.alpha) * self.objective + self.config.alpha * l
+  #     #self.objective += (self.config.alpha / (self.config.inf_iter - i + 1.0)) * l
+  #     #self.yp_ar.append(yp_current)
+  #     #yp_current = self.yp = self.get_prediction_net(input=(h_total/(self.config.inf_iter+0.0)), xinput=self.x, reuse=True)
+  #
+  #
+  #   self.yp = self.get_prediction_net(input=(h_total/k), xinput=self.x, reuse=True)
+  #   ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension])
+  #   l = self.get_loss(self.yt_ind, ind)
+  #
+  #   self.objective = l + self.config.l2_penalty * self.get_l2_loss()
+  #   #if self.config.dimension > 1:
+  #   #  self.yp = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num, self.config.dimension])
+  #   #else:
+  #   #  self.yp = self.yp_ar[-1] # self.get_prediction_net(h_total / self.config.inf_it)
+  #   # self.get_prediction_net(input=self.h_state)
+  #
+  #   # self.yp_ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension], name="reshaped")
+  #   # self.objective = -tf.reduce_sum(self.yt_ind * tf.log( tf.maximum(self.yp_ind, 1e-20)))
+  #   self.train_all_step = self.optimizer.minimize(self.objective)
+  #   self.train_step = self.optimizer.minimize(self.objective, var_list=self.spen_variables())
+  #
+  #   #self.yp_mlp = self.get_prediction_net(input=self.h0, xinput=feature, reuse=True)
+  #   # self.objective_mlp = self.get_loss(self.yt_ind, self.yp_mlp) + self.config.l2_penalty * self.get_l2_loss()
+  #   self.train_pred_step = self.optimizer.minimize(self.objective, var_list=self.pred_variables())
+  #   # predxh = self.predh_variables() + self.predx_variables()
+  #   # hspen = self.predh_variables() + self.spen_variables()
+  #   # self.train_hspen_step = self.optimizer.minimize(self.objective, var_list=hspen)
+  #   # self.train_predhx_step = self.optimizer.minimize(self.objective, var_list=predxh)
 
   def ssvm_training(self):
     self.margin_weight_ph = tf.placeholder(tf.float32, shape=[], name="Margin")
@@ -500,6 +642,8 @@ class SPEN:
       return self.rank_based_training()
     elif training_type == TrainingType.End2End:
       return self.end2end_training()
+    elif training_type == TrainingType.Value_Matching:
+      return self.value_training()
     else:
       raise NotImplementedError
 
@@ -707,6 +851,7 @@ class SPEN:
                  self.h: h_init,
                  self.inf_penalty_weight_ph: self.config.inf_penalty,
                  self.is_training : 1.0 if train else 0.0,
+                  self.bs_ph: np.shape(xinput)[0],
                  self.dropout_ph: self.config.dropout}
     h_ar = self.sess.run(self.h_ar ,feed_dict=feeddic)
     return h_ar[-1]
@@ -719,6 +864,7 @@ class SPEN:
                  self.h: h_init,
                  self.inf_penalty_weight_ph: self.config.inf_penalty,
                  self.is_training : 1.0 if train else 0.0,
+                 self.bs_ph: np.shape(xinput)[0],
                  self.dropout_ph: self.config.dropout}
     h_ar = self.sess.run(self.h_ar ,feed_dict=feeddic)
     return h_ar
@@ -727,11 +873,13 @@ class SPEN:
     tflearn.is_training(is_training=train, session=self.sess)
     if end2end:
       #h_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.hidden_num))
-      h_init = np.random.normal(0, 1, size=(np.shape(xinput)[0], self.config.hidden_num))
+      #h_init = np.random.normal(0, 2, size=(np.shape(xinput)[0], self.config.hidden_num))
+      h_init = np.zeros((np.shape(xinput)[0], self.config.hidden_num))
       feeddic = {self.x: xinput,
                  self.h: h_init,
                  self.is_training: 1.0 if train else 0.0,
                  self.inf_penalty_weight_ph: self.config.inf_penalty,
+                 self.bs_ph: np.shape(xinput)[0],
                  self.dropout_ph: self.config.dropout}
       yp = self.sess.run(self.yp, feed_dict=feeddic)
     else:
@@ -778,7 +926,7 @@ class SPEN:
 
   def map_predict(self, xinput=None, train=False, inf_iter=None, ascent=True, end2end=False, continuous=False):
     yp = self.soft_predict(xinput=xinput, train=train, inf_iter=inf_iter, ascent=ascent, end2end=end2end)
-    if continuous and self.config.dimension == 1:
+    if self.config.dimension == 1:
       return yp
     else:
       return np.argmax(yp, 2)
@@ -852,9 +1000,13 @@ class SPEN:
 
   def train_supervised_batch(self, xbatch, ybatch, verbose=0):
     tflearn.is_training(True, self.sess)
-    yt_ind = self.var_to_indicator(ybatch)
-    yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+    if self.config.dimension > 1:
+      yt_ind = self.var_to_indicator(ybatch)
+      yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
     #xd, yd, yp_ind = self.get_all_diff(xinput=xbatch, yinput=yt_ind, ascent=True, inf_iter=10)
+    else:
+      yt_ind = ybatch
+
     yp_ind = self.loss_augmented_soft_predict(xinput=xbatch, yinput=yt_ind, train=True, ascent=True)
     yp_ind = np.reshape(yp_ind, (-1, self.config.output_num*self.config.dimension))
     #yt_ind = np.reshape(yd, (-1, self.config.output_num*self.config.dimension))
@@ -870,15 +1022,49 @@ class SPEN:
       print (self.train_iter ,o,n, en_yt, en_yhat)
     return n
 
-  def train_supervised_e2e_batch3(self, xbatch, ybatch, verbose=0):
+  # def train_supervised_e2e_batch3(self, xbatch, ybatch, verbose=0):
+  #   tflearn.is_training(True, self.sess)
+  #   if self.config.dimension > 1:
+  #     yt_ind = self.var_to_indicator(ybatch)
+  #     yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+  #   else:
+  #     yt_ind = ybatch
+  #
+  #   h_init = np.random.normal(0, 1, size=(np.shape(xbatch)[0], self.config.hidden_num))
+  #   #h_0 = np.zeros((np.shape(xbatch)[0], self.config.hidden_num))
+  #   feeddic = {self.x:xbatch, self.yt_ind: yt_ind,
+  #              self.h: h_init,
+  #              #self.h0 : h_0,
+  #              self.learning_rate_ph:self.config.learning_rate,
+  #              self.inf_penalty_weight_ph: self.config.inf_penalty,
+  #              self.is_training: 1.0,
+  #              self.dropout_ph: self.config.dropout}
+  #
+  #   if self.train_iter < self.config.pretrain_iter:
+  #     _, o,en_ar, g_ar, h_ar  = self.sess.run([self.train_pre_step, self.obj_mlp, self.en_ar, self.g_ar, self.h_ar], feed_dict=feeddic)
+  #
+  #   else:
+  #     _, o,en_ar, g_ar, h_ar  = self.sess.run([self.train_post_step, self.objective, self.en_ar, self.g_ar, self.h_ar], feed_dict=feeddic)
+  #
+  #     if verbose > 0:
+  #       print ("---------------------------------------------------------")
+  #       for k in range(self.config.inf_iter):
+  #         print (np.average(np.linalg.norm(g_ar[k], axis=1)), np.average(np.linalg.norm(h_ar[k], axis=1)), np.average(en_ar[k]),)
+  #   return o
+
+
+  def train_supervised_e2e_batch_o(self, xbatch, ybatch, verbose=0):
     tflearn.is_training(True, self.sess)
     if self.config.dimension > 1:
       yt_ind = self.var_to_indicator(ybatch)
+     # print(yt_ind[0,0:1000,0])
+     # print(yt_ind[0,0:1000,1])
       yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+
     else:
       yt_ind = ybatch
 
-    h_init = np.random.normal(0, 1, size=(np.shape(xbatch)[0], self.config.hidden_num))
+    h_init = np.random.normal(0, self.config.scale, size=(np.shape(xbatch)[0], self.config.hidden_num))
     #h_0 = np.zeros((np.shape(xbatch)[0], self.config.hidden_num))
     feeddic = {self.x:xbatch, self.yt_ind: yt_ind,
                self.h: h_init,
@@ -888,30 +1074,29 @@ class SPEN:
                self.is_training: 1.0,
                self.dropout_ph: self.config.dropout}
 
-    if self.train_iter < self.config.pretrain_iter:
-      _, o,en_ar, g_ar, h_ar  = self.sess.run([self.train_pre_step, self.obj_mlp, self.en_ar, self.g_ar, self.h_ar], feed_dict=feeddic)
 
-    else:
-      _, o,en_ar, g_ar, h_ar  = self.sess.run([self.train_post_step, self.objective, self.en_ar, self.g_ar, self.h_ar], feed_dict=feeddic)
-
-      if verbose > 0:
-        print ("---------------------------------------------------------")
-        for k in range(self.config.inf_iter):
-          print (np.average(np.linalg.norm(g_ar[k], axis=1)), np.average(np.linalg.norm(h_ar[k], axis=1)), np.average(en_ar[k]),)
+    _, o, g, h, iter = self.sess.run(
+          [self.train_all_step, self.objective, self.g_ar, self.h_ar, self.iter], feed_dict=feeddic)
+    if verbose > 0:
+      print (o, g[-1], h[-1], iter)
     return o
 
   def train_supervised_e2e_batch(self, xbatch, ybatch, verbose=0):
     tflearn.is_training(True, self.sess)
     if self.config.dimension > 1:
       yt_ind = self.var_to_indicator(ybatch)
+     # print(yt_ind[0,0:1000,0])
+     # print(yt_ind[0,0:1000,1])
       yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+
     else:
       yt_ind = ybatch
 
-    h_init = np.random.normal(0, 1, size=(np.shape(xbatch)[0], self.config.hidden_num))
+    h_init = np.random.normal(0, self.config.scale, size=(np.shape(xbatch)[0], self.config.hidden_num))
     #h_0 = np.zeros((np.shape(xbatch)[0], self.config.hidden_num))
     feeddic = {self.x:xbatch, self.yt_ind: yt_ind,
                self.h: h_init,
+               self.bs_ph : np.shape(xbatch)[0],
                #self.h0 : h_0,
                self.learning_rate_ph:self.config.learning_rate,
                self.inf_penalty_weight_ph: self.config.inf_penalty,
@@ -927,43 +1112,82 @@ class SPEN:
           [self.train_all_step, self.objective, self.en_ar, self.g_ar, self.h_ar, self.l_ar], feed_dict=feeddic)
 
       else:
-        _, o,en_ar, g_ar, h_ar, l_ar  = self.sess.run([self.train_step, self.objective, self.en_ar, self.g_ar, self.h_ar, self.l_ar], feed_dict=feeddic)
+        _, o,en_ar, g_ar, h_ar, l_ar  = self.sess.run([self.train_step, self.objective, self.en_ar,
+                                                       self.g_ar, self.h_ar, self.l_ar], feed_dict=feeddic)
 
       if verbose > 0:
         print ("---------------------------------------------------------")
         for k in range(self.config.inf_iter):
-          print (np.average(np.linalg.norm(g_ar[k], axis=1)), np.average(np.linalg.norm(h_ar[k], axis=1)), np.average(en_ar[k]), np.average(l_ar[k]) )
+          if verbose>1:
+            print (h_ar[k][0])
+          print (g_ar[k], np.average(np.sum(h_ar[k], axis=1)), np.average(en_ar[k]), np.average(l_ar[k]) )
     return o
 
 
-  def train_supervised_e2e_batch2(self, xbatch, ybatch, verbose=0):
+  def train_supervised_e2e_batch4(self, xbatch, ybatch, verbose=0):
     tflearn.is_training(True, self.sess)
     if self.config.dimension > 1:
       yt_ind = self.var_to_indicator(ybatch)
+     # print(yt_ind[0,0:1000,0])
+     # print(yt_ind[0,0:1000,1])
       yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+
     else:
       yt_ind = ybatch
 
-    h_init = np.random.normal(0, 1, size=(np.shape(xbatch)[0], self.config.hidden_num))
+    h_init = np.random.normal(0, self.config.scale, size=(np.shape(xbatch)[0], self.config.hidden_num))
     #h_0 = np.zeros((np.shape(xbatch)[0], self.config.hidden_num))
     feeddic = {self.x:xbatch, self.yt_ind: yt_ind,
                self.h: h_init,
-               #self.h0 : h_0,
                self.learning_rate_ph:self.config.learning_rate,
                self.inf_penalty_weight_ph: self.config.inf_penalty,
                self.is_training: 1.0,
                self.dropout_ph: self.config.dropout}
 
-
-
-
     if self.train_iter < self.config.pretrain_iter:
-      _, o = self.sess.run([self.train_hspen_step, self.objective], feed_dict=feeddic)
+      _, o = self.sess.run([self.train_pre_step, self.obj_mlp], feed_dict=feeddic)
 
     else:
-      _, o = self.sess.run(
-          [self.train_predhx_step, self.objective], feed_dict=feeddic)
+      _, o,en_ar, g_ar, h_ar, l_ar  = self.sess.run([self.train_post_step, self.objective, self.en_ar, self.g_ar, self.h_ar, self.l_ar], feed_dict=feeddic)
+
+      if verbose > 0:
+        print ("---------------------------------------------------------")
+        for k in range(self.config.inf_iter):
+          print (h_ar[0])
+
+          print (np.average(np.linalg.norm(g_ar[k], axis=1)), np.mean(h_ar[k]), np.average(en_ar[k]), np.average(l_ar[k]) )
     return o
+
+
+  # def train_supervised_e2e_batch2(self, xbatch, ybatch, verbose=0):
+  #   tflearn.is_training(True, self.sess)
+  #   if self.config.dimension > 1:
+  #     yt_ind = self.var_to_indicator(ybatch)
+  #     yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
+  #
+  #   else:
+  #     yt_ind = ybatch
+  #
+  #   h_init = np.random.normal(0, 1, size=(np.shape(xbatch)[0], self.config.hidden_num))
+  #   #h_0 = np.zeros((np.shape(xbatch)[0], self.config.hidden_num))
+  #   feeddic = {self.x:xbatch, self.yt_ind: yt_ind,
+  #              self.h: h_init,
+  #              #self.h0 : h_0,
+  #              self.learning_rate_ph:self.config.learning_rate,
+  #              self.inf_penalty_weight_ph: self.config.inf_penalty,
+  #              self.is_training: 1.0,
+  #              self.dropout_ph: self.config.dropout}
+  #
+  #
+  #
+  #
+  #   if self.train_iter < self.config.pretrain_iter:
+  #     _, o = self.sess.run([self.train_hspen_step, self.objective], feed_dict=feeddic)
+  #
+  #   else:
+  #     _, o = self.sess.run(
+  #         [self.train_predhx_step, self.objective], feed_dict=feeddic)
+  #   return o
 
   def save(self, path):
     self.saver.save(self.sess, path)
