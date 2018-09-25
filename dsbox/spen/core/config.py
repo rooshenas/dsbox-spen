@@ -33,3 +33,6 @@ class Config:
     self.input_num = 0
     self.output_num = 0
     self.loglevel = 0
+    self.inf_clip_min = -1.0
+    self.inf_clip_max = 1.0
+

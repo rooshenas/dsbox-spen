@@ -1,8 +1,8 @@
 import numpy as np
-import pickle
+import pickle as pkl
 import pandas as pd
 import cv2
-
+import pickle
 
 class RandomCrop(object):
   "taken from https://seba-1511.github.io/tutorials/beginner/data_loading_tutorial.html"
@@ -203,7 +203,23 @@ def get_fashion():
 
   return xdata, xval, xtest, ydata, yval, ytest
 
+def get_mnist_1q():
+  xtrfile = "/iesl/canvas/pedram/mnist/mnist-1q.ts.ev"
+  xtsfile = "/iesl/canvas/pedram/mnist/mnist-1q.test.ev"
+  xvalfile ="/iesl/canvas/pedram/mnist/mnist-1q.valid.ev"
+  ytrfile = "/iesl/canvas/pedram/mnist/mnist-1q.ts.data"
+  ytsfile = "/iesl/canvas/pedram/mnist/mnist-1q.test.data"
+  yvalfile ="/iesl/canvas/pedram/mnist/mnist-1q.valid.data"
 
+  xdata = load_data(xtrfile)
+  xval = load_data(xvalfile)
+  xtest = load_data(xtsfile)
+
+  ydata = load_data(ytrfile)
+  yval = load_data(yvalfile)
+  ytest = load_data(ytsfile)
+
+  return xdata, xval, xtest, ydata, yval, ytest
 
 def get_fashion_1q():
   xtrfile = "/iesl/canvas/pedram/fashion/fashion-1q.ts.ev"
@@ -224,7 +240,55 @@ def get_fashion_1q():
   return xdata, xval, xtest, ydata, yval, ytest
 
 
+def get_fashion_1q_pkl():
+  path = '/iesl/canvas/pedram/fashion'
+  testxf = "{}/fashion-1q-test-x.pkl".format(path)
+  dataxf = "{}/fashion-1q-train-x.pkl".format(path)
+  valxf = "{}/fashion-1q-val-x.pkl".format(path)
+  testyf = "{}/fashion-1q-test-y.pkl".format(path)
+  datayf = "{}/fashion-1q-train-y.pkl".format(path)
+  valyf = "{}/fashion-1q-val-y.pkl".format(path)
+  with open(testxf, 'rb') as f:
+    xtest = pkl.load(f)
+  with open(dataxf, 'rb') as f:
+    xdata = pkl.load(f)
+  with open(valxf, 'rb') as f:
+    xval = pkl.load(f)
 
+  with open(testyf, 'rb') as f:
+    ytest = pkl.load(f)
+  with open(datayf, 'rb') as f:
+    ydata = pkl.load(f)
+  with open(valyf, 'rb') as f:
+    yval = pkl.load(f)
+
+  return xdata, xval, xtest, ydata, yval, ytest
+
+
+
+def get_mnist_1q_pkl():
+  path = '/iesl/canvas/pedram/mnist'
+  testxf = "{}/mnist-1q-test-x.pkl".format(path)
+  dataxf = "{}/mnist-1q-train-x.pkl".format(path)
+  valxf  = "{}/mnist-1q-val-x.pkl".format(path)
+  testyf = "{}/mnist-1q-test-y.pkl".format(path)
+  datayf = "{}/mnist-1q-train-y.pkl".format(path)
+  valyf  = "{}/mnist-1q-val-y.pkl".format(path)
+  with open(testxf, 'rb') as f:
+    xtest = pkl.load(f)
+  with open(dataxf, 'rb') as f:
+    xdata = pkl.load(f)
+  with open(valxf, 'rb') as f:
+    xval = pkl.load(f)
+
+  with open(testyf, 'rb') as f:
+    ytest = pkl.load(f)
+  with open(datayf, 'rb') as f:
+    ydata = pkl.load(f)
+  with open(valyf, 'rb') as f:
+    yval = pkl.load(f)
+
+  return xdata, xval, xtest, ydata, yval, ytest
 
 def load_horses():
   path = '/iesl/canvas/pedram/WeizmannSingleScale/horses/'
@@ -309,25 +373,25 @@ def get_ppi(ratio):
   return (xdata,xval, xtest,ydata,yval, ytest)
 
 def get_citation_data():
-    with open('/iesl/canvas/pedram/CORA/X_train.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/xdata-lower.pickle') as f:
       xdata = pickle.load(f)
 
     with open('/iesl/canvas/pedram/CORA/Y_train.pickle') as f:
       ydata = pickle.load(f)
 
-    with open('/iesl/canvas/pedram/CORA/X_dev.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/xval-lower.pickle') as f:
       xval = pickle.load(f)
 
     with open('/iesl/canvas/pedram/CORA/Y_dev.pickle') as f:
       yval = pickle.load(f)
 
-    with open('/iesl/canvas/pedram/CORA/X_test.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/xtest-lower.pickle') as f:
       xtest = pickle.load(f)
 
     with open('/iesl/canvas/pedram/CORA/Y_test.pickle') as f:
       ytest = pickle.load(f)
 
-    with open('/iesl/canvas/pedram/CORA/X_unlabelled.pickle') as f:
+    with open('/iesl/canvas/pedram/CORA/xdata-unlab-lower.pickle') as f:
       x_unlab = pickle.load(f)
 
     return xdata, xval, xtest, ydata, yval, ytest, x_unlab

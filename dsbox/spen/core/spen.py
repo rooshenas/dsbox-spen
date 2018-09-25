@@ -234,12 +234,14 @@ class SPEN:
 
 
 
+
+
+
   def end2end_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
     self.yp_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYP")
     #y_start, features = self.get_initialization_net(self.x, self.config.output_num * self.config.dimension, embedding=self.embedding)
-
 
     y_start = self.yp_ind
 
@@ -264,6 +266,8 @@ class SPEN:
       next_yp_ind = current_yp_ind + self.config.inf_rate * g
       current_yp_ind = next_yp_ind
       if self.config.dimension > 1:
+
+
         yp_matrix = tf.reshape(current_yp_ind, [-1, self.config.output_num, self.config.dimension])
         l = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(
           logits=tf.reshape(current_yp_ind,(-1, self.config.output_num, self.config.dimension)),

@@ -19,6 +19,8 @@ class TrainingType(Enum):
   Rank_Based = 3
   End2End = 4
 
+
+
 class SPEN:
   def __init__(self,config):
     self.config = config
@@ -27,7 +29,6 @@ class SPEN:
     self.is_training = tf.placeholder(tf.float32, shape=[], name="IsTraining")
     self.dropout_ph = tf.placeholder(tf.float32, shape=[], name="Dropout")
     self.bs_ph = tf.placeholder(tf.int32, shape=[], name="BatchSize")
-
     self.embedding=None
     self.train_iter = 0.0
 
@@ -37,13 +38,15 @@ class SPEN:
     self.sess = tf.Session()
     self.sess.run(init_op)
     self.saver = tf.train.Saver()
-
     return self
 
   def init_embedding(self, embedding):
     self.sess.run(self.embedding_init, feed_dict={self.embedding_placeholder: embedding})
     return self
 
+  def init_output_embedding(self, embedding):
+    self.sess.run(self.output_embedding_init, feed_dict={self.output_embedding_placeholder: embedding})
+    return self
 
   def set_train_iter(self, iter):
     self.train_iter = iter
@@ -131,6 +134,9 @@ class SPEN:
 
   def ce_loss(self, yt, yp):
     eps = 1e-20
+
+    print "yt",yt.get_shape().as_list()
+    print "yp",yp.get_shape().as_list()
     #ypc = tf.reshape(yp, (-1, self.config.output_num, self.config.dimension))
     #yp = tf.clip_by_value(yp, clip_value_min=eps, clip_value_max=1.0 - eps )
     #ytc = tf.reshape(yt, (-1, self.config.output_num, self.config.dimension))
@@ -312,6 +318,8 @@ class SPEN:
   def end2end_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.h = tf.placeholder(tf.float32, shape=[None, self.config.hidden_num], name="hinput")
+    #self.h = self.output_embedding_placeholder
+
     noinit = False
     try:
       h_start, features = self.get_initialization_net(self.x, self.config.hidden_num, embedding=self.embedding)
@@ -359,9 +367,11 @@ class SPEN:
     for i in range(int(self.config.inf_iter)):
       #tf.square(tf.norm(h_current, axis=1) - 1)
       penalty_current = self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(h_current),1)
-      energy_current = self.get_energy(xinput=self.x if noinit else features, yinput=h_current, embedding=None, reuse=True if i > 0 else False) - penalty_current
+      print "hpenalty", penalty_current.get_shape().as_list()
+
+      energy_current = self.get_energy(xinput=self.x if noinit else features, yinput=h_current, embedding=self.embedding, reuse=True if i > 0 else False, ) - penalty_current
       g = tf.gradients(energy_current, h_current)[0]
-      g = tf.clip_by_value(g, clip_value_min=-1.0, clip_value_max=1.0)
+      g = tf.clip_by_value(g, clip_value_min=self.config.inf_clip_min, clip_value_max=self.config.inf_clip_max)
       en_total += energy_current
       self.en_ar.append(energy_current)
       self.g_ar.append(tf.reduce_mean(tf.norm(g,1)))
@@ -387,12 +397,15 @@ class SPEN:
 
       else:
         yp_current_logits = tf.reshape(yp_current_logits, (-1, self.config.output_num, self.config.dimension))
-        yp_current = tf.nn.softmax(yp_current_logits, dim=2)
+        yp_current = tf.nn.softmax(yp_current_logits, 2)
         #l = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(
         #    logits=yp_current_logits,
         #    labels=tf.reshape(self.yt_ind, (-1, self.config.output_num, self.config.dimension))))
 
       ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
+      # print "ind:", ind.get_shape().as_list()
+      # print "ytind", self.yt_ind.get_shape().as_list()
+
       l  = self.get_loss(self.yt_ind, ind)
       #l = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=yp_current_logits, labels=self.yt_ind))
       self.l_ar.append(tf.reduce_mean(l))
@@ -411,7 +424,7 @@ class SPEN:
     #ind = tf.reshape(self.yp_ar[-1], [-1, self.config.output_num * self.config.dimension])
     #l = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(logits=yp_current_logits, labels=self.yt_ind))
     #self.objective = self.get_loss(self.yt_ind, ind) + self.config.l2_penalty * self.get_l2_loss()
-    self.objective = tf.reduce_sum(l) + self.config.l2_penalty * self.get_l2_loss() + self.ce_loss(self.yt_ind, ind)
+    self.objective = tf.reduce_sum(l) + self.config.l2_penalty * self.get_l2_loss() #+ self.ce_loss(self.yt_ind, ind)
 
     self.yp = self.yp_ar[-1]
     #if self.config.dimension > 1:
@@ -630,6 +643,18 @@ class SPEN:
       self.embedding = tf.get_variable("emb", shape=[self.vocabulary_size, self.embedding_size], dtype=tf.float32,
                                        initializer=tfi.zeros(), trainable=True)
     self.embedding_init = self.embedding.assign(self.embedding_placeholder)
+
+    return self
+
+  def construct_output_embedding(self, embedding_size, vocabulary_size):
+    self.output_vocabulary_size = vocabulary_size
+    self.output_embedding_size = embedding_size
+    self.output_embedding_placeholder = tf.placeholder(tf.float32, [self.output_vocabulary_size, self.output_embedding_size])
+
+    with tf.variable_scope(self.config.spen_variable_scope) as scope:
+      self.output_embedding = tf.get_variable("output_emb", shape=[self.output_vocabulary_size, self.output_embedding_size], dtype=tf.float32,
+                                       initializer=tfi.zeros(), trainable=True)
+    self.output_embedding_init = self.output_embedding.assign(self.output_embedding_placeholder)
 
     return self
 
@@ -1085,17 +1110,13 @@ class SPEN:
     tflearn.is_training(True, self.sess)
     if self.config.dimension > 1:
       yt_ind = self.var_to_indicator(ybatch)
-     # print(yt_ind[0,0:1000,0])
-     # print(yt_ind[0,0:1000,1])
       yt_ind = np.reshape(yt_ind, (-1, self.config.output_num*self.config.dimension))
-
     else:
       yt_ind = ybatch
 
     h_init = np.random.normal(0, self.config.scale, size=(np.shape(xbatch)[0], self.config.hidden_num))
-    #h_0 = np.zeros((np.shape(xbatch)[0], self.config.hidden_num))
     feeddic = {self.x:xbatch, self.yt_ind: yt_ind,
-               self.h: h_init,
+              self.h: h_init,
                self.bs_ph : np.shape(xbatch)[0],
                #self.h0 : h_0,
                self.learning_rate_ph:self.config.learning_rate,
@@ -1120,7 +1141,9 @@ class SPEN:
         for k in range(self.config.inf_iter):
           if verbose>1:
             print (h_ar[k][0])
-          print (g_ar[k], np.average(np.sum(h_ar[k], axis=1)), np.average(en_ar[k]), np.average(l_ar[k]) )
+
+
+          print (k,g_ar[k], np.average(np.sum(h_ar[k], axis=1)), np.average(en_ar[k]), np.average(l_ar[k]) )
     return o
 
 
