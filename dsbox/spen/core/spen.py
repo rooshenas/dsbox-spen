@@ -17,6 +17,7 @@ class TrainingType(Enum):
   SSVM = 2
   Rank_Based = 3
   End2End = 4
+  NDLM = 5
 
 class SPEN:
   def __init__(self,config):
@@ -157,7 +158,6 @@ class SPEN:
     raise NotImplementedError
 
 
-
   def value_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
@@ -233,14 +233,13 @@ class SPEN:
     self.train_step = self.optimizer.minimize(self.objective)
 
 
-
   def direct_loss_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
     self.yp_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYP")
 
-
-    y_start, features = self.get_initialization_net(self.x, self.config.output_num * self.config.dimension, embedding=self.embedding)
+    y_start = self.yp_ind
+    #y_start, features = self.get_initialization_net(self.x, self.config.output_num * self.config.dimension, embedding=self.embedding)
 
     current_yp_ind = y_start
     self.objective = 0.0
@@ -255,6 +254,7 @@ class SPEN:
     else:
       yp_ind = tf.nn.softmax(current_yp_ind)
 
+
     for i in range(int(self.config.inf_iter)):
       self.energy_y = self.get_energy(xinput=self.x, yinput=yp_ind, embedding=self.embedding, reuse=True if i > 0 else False)# - penalty_current
       g = tf.gradients(self.energy_y, current_yp_ind)[0]
@@ -264,11 +264,18 @@ class SPEN:
       if self.config.dimension > 1:
         yp_matrix = tf.reshape(current_yp_ind, [-1, self.config.output_num, self.config.dimension])
         yp_current = tf.nn.softmax(yp_matrix, 2)
+        l = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(
+          logits=tf.reshape(current_yp_ind,(-1, self.config.output_num, self.config.dimension)),
+          labels=tf.reshape(self.yt_ind, (-1, self.config.output_num, self.config.dimension))))
+        l = tf.stop_gradient(l)
+        yp_ind = tf.nn.softmax(current_yp_ind)
       else:
         yp_current =  tf.nn.sigmoid(current_yp_ind)
+        yp_ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
+        #ll = self.yt_ind*tf.log(yp_ind + 1e-9)
+        l = tf.stop_gradient(tf.reduce_sum( tf.abs( (tf.nn.relu(yp_current - 0.5) - self.yt_ind)), axis=1))
+	#self.get_loss(self.yt_ind, yp_ind)
 
-      yp_ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
-      l = tf.reduce_sum(self.get_loss(self.yt_ind, yp_ind))
       self.ind_ar.append(tf.reduce_mean(tf.norm(yp_current,1)))
       self.l_ar.append(l)
       self.en_ar.append(self.energy_y)
@@ -276,11 +283,17 @@ class SPEN:
       self.yp_ar.append(yp_current)
 
     self.yp = self.yp_ar[-1] #self.get_prediction_net(input=self.h_state)
-    self.objective =  l + self.config.l2_penalty * self.get_l2_loss()
+
+
+    energy_yt = self.get_energy(xinput=self.x, yinput=self.yt_ind, embedding=self.embedding, reuse=True)
+    energy_yp = self.get_energy(xinput=self.x, yinput=yp_ind, embedding=self.embedding, reuse=True)
+    ediff =  tf.nn.relu( energy_yp - energy_yt + l) 
+    self.objective = tf.reduce_sum(ediff*ediff)
+    #self.objective += self.config.l2_penalty * self.get_l2_loss()
+
 
 
     self.train_step = self.optimizer.minimize(self.objective)
-
 
 
 
@@ -313,8 +326,6 @@ class SPEN:
       next_yp_ind = current_yp_ind + self.config.inf_rate * g
       current_yp_ind = next_yp_ind
       if self.config.dimension > 1:
-
-
         yp_matrix = tf.reshape(current_yp_ind, [-1, self.config.output_num, self.config.dimension])
         l = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(
           logits=tf.reshape(current_yp_ind,(-1, self.config.output_num, self.config.dimension)),
@@ -329,7 +340,7 @@ class SPEN:
 
       yp_ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
       l = tf.reduce_sum(self.get_loss(self.yt_ind, yp_ind))
-        #self.get_loss(self.yt_ind, yp_ind)
+      #self.get_loss(self.yt_ind, yp_ind)
       self.ind_ar.append(tf.reduce_mean(tf.norm(yp_current,1)))
       self.l_ar.append(l)
       self.en_ar.append(self.energy_y)
@@ -443,6 +454,8 @@ class SPEN:
       return self.end2end_training()
     elif training_type == TrainingType.Value_Matching:
       return self.value_training()
+    elif training_type == TrainingType.NDLM:
+      return self.direct_loss_training()
     else:
       raise NotImplementedError
 
