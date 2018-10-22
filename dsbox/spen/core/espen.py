@@ -20,8 +20,9 @@ class TrainingType(Enum):
     Value_Matching = 1
     SSVM = 2
     Rank_Based = 3
-    End2End = 4
-    CLL = 5
+    Rank_Based_Expected = 4
+    End2End = 5
+    CLL = 6
 
 
 class SPEN:
@@ -190,6 +191,100 @@ class SPEN:
         self.train_step = self.optimizer.apply_gradients(capped_gvs)
         return self
 
+    def rank_based_training_expected(self):
+
+        # feed_dict = {self.x: x_b,  # (600, 1836) --> bs, nf
+        #              self.yp_h_ind: np.reshape(y_h, (-1, self.config.output_num * self.config.dimension)),
+        #              # (600, 318) --> bs, output_num (159) x dimension i.e. num_labels x label_dimension
+        #              self.yp_l_ind: np.reshape(y_l, (-1, self.config.output_num * self.config.dimension)),
+        #              # (600, 318) --> bs, output_num (159) x dimension
+        #              self.value_l: l_l,  # bs -- task loss value for lower configuration
+        #              self.value_h: l_h,  # bs -- task loss value for higher configuration
+        #              self.learning_rate_ph: self.config.learning_rate,  # learning rate : scalar
+        #              self.dropout_ph: self.config.dropout,  # dropout rate: scalar
+        #              self.inf_penalty_weight_ph: self.config.inf_penalty,
+        #              # penalty : which is set to zero at the moment
+        #              self.margin_weight_ph: self.config.margin_weight})  # margin_weight : also scalar
+        #
+
+        self.margin_weight_ph = tf.placeholder(tf.float32, shape=[], name="Margin")
+        self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
+        self.yp_h_ind = tf.placeholder(tf.float32,
+                                       shape=[None, self.config.output_num * self.config.dimension],
+                                       name="YP_H")
+
+        self.yp_l_ind = tf.placeholder(tf.float32,
+                                       shape=[None, self.config.output_num * self.config.dimension],
+                                       name="YP_L")
+
+        yp_ind_sm_h = tf.nn.softmax(tf.reshape(self.yp_h_ind, [-1, self.config.output_num, self.config.dimension]))
+        # [batch_size x num_labels x softmax(label_dimension)]
+        self.yp_h = tf.reshape(yp_ind_sm_h, [-1, self.config.output_num * self.config.dimension])
+        # [[batch_size x num_labels] x softmax(label_dimension)]
+
+        yp_ind_sm_l = tf.nn.softmax(tf.reshape(self.yp_l_ind, [-1, self.config.output_num, self.config.dimension]))
+        # [batch_size x num_labels x softmax(label_dimension)]
+        self.yp_l = tf.reshape(yp_ind_sm_l, [-1, self.config.output_num * self.config.dimension])
+        # [[batch_size x num_labels] x softmax(label_dimension)]
+
+        self.value_h = tf.placeholder(tf.float32, shape=[None])
+        # Float scalar value
+        self.value_l = tf.placeholder(tf.float32, shape=[None])
+        # Float scalar value
+
+        self.yh_penalty = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(self.yp_h_ind), 1)
+        # scalar: inference penalty sum, we square along the label dimension and sum it
+
+        self.yl_penalty = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(self.yp_l_ind), 1)
+        # same as above
+
+        self.energy_yh_ = self.get_energy(xinput=self.x, yinput=self.yp_h, embedding=self.embedding,
+                                          reuse=False)  # - self.yh_penalty
+        # inputs: self.x: bs x nf  and yp_h: bs, output_num (159) x dimension i.e. num_labels x label_dimension
+        # output is a scalar
+
+        self.energy_yl_ = self.get_energy(xinput=self.x, yinput=self.yp_l, embedding=self.embedding,
+                                          reuse=True)  # - self.yl_penalty
+        # save as previous
+
+        self.energy_yh = self.energy_yh_ - self.yh_penalty
+        self.energy_yl = self.energy_yl_ - self.yl_penalty
+
+        self.yp_ind = self.yp_h_ind
+        self.yp = self.yp_h
+        self.energy_yp = self.energy_yh
+
+        # self.en = -tf.reduce_sum(self.yp * tf.log( tf.maximum(self.yp, 1e-20)), 1)
+
+        self.energy_ygradient = tf.gradients(self.energy_yp, self.yp_ind)[0]   # dimension ??? no clue
+
+        self.ce = -tf.reduce_sum(self.yp_h * tf.log(tf.maximum(self.yp_l, 1e-20)), 1)   # [[batch_size x num_labels] x softmax(label_dimension)] -- cross entropy computation on the third dimension
+
+        self.diff = (self.value_h - self.value_l) * self.margin_weight_ph       # difference between values
+
+        self.objective = tf.reduce_sum(tf.maximum(-self.energy_yh + self.energy_yl + self.diff, 0.0)) \
+                         + self.config.l2_penalty * self.get_l2_loss()  # L2 regularization with margin loss
+
+        self.num_update = tf.reduce_sum(tf.cast((self.diff > (self.energy_yh - self.energy_yl)), tf.float32))   # tracks number of points that are useful for gradient updates
+
+        self.vh_sum = tf.reduce_mean(self.value_h)      # takes mean over the batch
+        self.vl_sum = tf.reduce_mean(self.value_l)      # takes mean over the batch
+        self.eh_sum = tf.reduce_mean(self.energy_yh)    # takes mean over the batch
+        self.el_sum = tf.reduce_mean(self.energy_yl)    # takes mean over the batch
+
+        # self.train_step = self.optimizer.minimize(self.objective, var_list=self.energy_variables())
+        # self.train_step = self.optimizer.minimize(self.objective)
+        grads_vals = self.optimizer.compute_gradients(self.objective)
+
+        capped_gvs = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in grads_vals]
+        #train_op = optimizer.apply_gradients(capped_gvs)
+        # self.grad_norm = tf.reduce_mean(tf.norm(grads, 1))
+
+        self.grad_norm = tf.constant(0.0)   # don't know what is the purpose of this guy?
+        self.train_step = self.optimizer.apply_gradients(capped_gvs)
+        return self
+
+
     def construct_embedding(self, embedding_size, vocabulary_size):
         self.vocabulary_size = vocabulary_size
         self.embedding_size = embedding_size
@@ -208,6 +303,8 @@ class SPEN:
             return self.ssvm_training()
         elif training_type == TrainingType.Rank_Based:
             return self.rank_based_training()
+        elif training_type == TrainingType.Rank_Based_Expected:
+            return self.rank_based_training_expected()
         elif training_type == TrainingType.End2End:
             return self.end2end_training()
         elif training_type == TrainingType.Value_Matching:
@@ -723,15 +820,15 @@ class SPEN:
             _, o1, g, n1, v1, v2, e1, e2 = self.sess.run(
                 [self.train_step, self.objective, self.grad_norm, self.num_update, self.vh_sum, self.vl_sum,
                  self.eh_sum, self.el_sum],
-                feed_dict={self.x: x_b,
-                           self.yp_h_ind: np.reshape(y_h, (-1, self.config.output_num * self.config.dimension)),
-                           self.yp_l_ind: np.reshape(y_l, (-1, self.config.output_num * self.config.dimension)),
-                           self.value_l: l_l,
-                           self.value_h: l_h,
-                           self.learning_rate_ph: self.config.learning_rate,
-                           self.dropout_ph: self.config.dropout,
-                           self.inf_penalty_weight_ph: self.config.inf_penalty,
-                           self.margin_weight_ph: self.config.margin_weight})
+                feed_dict={self.x: x_b, # (600, 1836) --> bs, nf
+                           self.yp_h_ind: np.reshape(y_h, (-1, self.config.output_num * self.config.dimension)), # (600, 318) --> bs, output_num (159) x dimension i.e. num_labels x label_dimension
+                           self.yp_l_ind: np.reshape(y_l, (-1, self.config.output_num * self.config.dimension)), # (600, 318) --> bs, output_num (159) x dimension
+                           self.value_l: l_l, # bs -- task loss value for lower configuration
+                           self.value_h: l_h, # bs -- task loss value for higher configuration
+                           self.learning_rate_ph: self.config.learning_rate,  # learning rate : scalar
+                           self.dropout_ph: self.config.dropout, # dropout rate: scalar
+                           self.inf_penalty_weight_ph: self.config.inf_penalty, # penalty : which is set to zero at the moment
+                           self.margin_weight_ph: self.config.margin_weight})   # margin_weight : also scalar
 
             if verbose > 0:
                 # print("************************************************************************************************")

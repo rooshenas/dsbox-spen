@@ -59,6 +59,9 @@ class EnergyModel:
     def get_feature_net_mlp(self, xinput, output_num, embedding=None, reuse=False):
         # with tf.variable_scope("spen/fx") as scope:
 
+        # xinput: bs x nf  and yp_h: scalar equal to output_num (159) x dimension i.e. num_labels x label_dimension
+        # output: bs x output_num (159) x dimension i.e. num_labels x label_dimension
+
         net = xinput
         j = 0
         for (sz, a) in self.config.layer_info:
@@ -66,14 +69,17 @@ class EnergyModel:
                                           weight_decay=self.config.weight_decay, activation=a,
                                           weights_init=tfi.variance_scaling(),
                                           bias_init=tfi.zeros(), regularizer='L2', reuse=reuse, scope=("fx.h" + str(j)))
+
             # net = tflearn.layers.normalization.batch_normalization(net, reuse=reuse, scope=("bn.f" + str(j)))
             #net = tflearn.activations.relu(net)
             net = tflearn.dropout(net, 1.0 - self.config.dropout)
             j = j + 1
+
         logits = tflearn.fully_connected(net, output_num, activation='linear', regularizer='L2',
                                           weight_decay=self.config.weight_decay,
                                           weights_init=tfi.variance_scaling(), bias_init=tfi.zeros(),
                                           reuse=reuse, scope="fx.fc")
+
         #logits = net
         return logits
 
@@ -165,13 +171,19 @@ class EnergyModel:
             return tf.squeeze(global_e)
 
     def get_energy_mlp(self, xinput=None, yinput=None, embedding=None, reuse=False):
-        output_size = yinput.get_shape().as_list()[-1]
-        with tf.variable_scope(self.config.spen_variable_scope):
-            with tf.variable_scope(self.config.fx_variable_scope) as scope:
-                logits = self.get_feature_net_mlp(xinput, output_size, reuse=reuse)
 
-                mult = logits * yinput
-                local_e = tf.reduce_sum(mult, axis=1)
+        output_size = yinput.get_shape().as_list()[-1] # scalar, i.e. output_num (159) x dimension i.e. num_labels x label_dimension
+
+        with tf.variable_scope(self.config.spen_variable_scope):
+
+            with tf.variable_scope(self.config.fx_variable_scope) as scope:
+
+                logits = self.get_feature_net_mlp(xinput, output_size, reuse=reuse) # bs, output_num (159) x dimension
+
+                mult = logits * yinput # Element-wise multiplication [bs, output_num (159) x dimension]
+                local_e = tf.reduce_sum(mult, axis=1) # [bs,]
+
+
                 #print "here", logits.get_shape().as_list(), yinput.get_shape().as_list(), mult.get_shape().as_list(), local_e.get_shape().as_list()
 
                 #local_e = tflearn.fully_connected(mult, 1, activation='linear', regularizer='L2',
@@ -179,9 +191,11 @@ class EnergyModel:
                 #                                  weights_init=tfi.variance_scaling(),
                 #                                  bias=False,
                 #                                  bias_init=tfi.zeros(), reuse=reuse, scope=("en.l"))
+
+
             with tf.variable_scope(self.config.en_variable_scope) as scope:
                 j = 0
-                net = yinput
+                net = yinput # [bs, output_num (159) x dimension]
                 for (sz, a) in self.config.en_layer_info:
                     net = tflearn.fully_connected(net, sz,
                                                   weight_decay=self.config.weight_decay,
@@ -197,6 +211,7 @@ class EnergyModel:
                     # net = tflearn.dropout(net, 1.0 - self.config.dropout)
                     # net = tf.contrib.layers.layer_norm(net, reuse=reuse, scope=("ln"+str(j)))
                     j = j + 1
+
                 global_e = tf.squeeze(tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
                                                    weights_init=tfi.variance_scaling(), bias=False,
                                                    reuse=reuse, regularizer='L2',
