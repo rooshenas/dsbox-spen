@@ -174,24 +174,53 @@ class EnergyModel:
 
         output_size = yinput.get_shape().as_list()[-1] # scalar, i.e. output_num (159) x dimension i.e. num_labels x label_dimension
 
-        with tf.variable_scope(self.config.spen_variable_scope):
+        with tf.variable_scope(self.config.spen_variable_scope, reuse=reuse):
 
-            with tf.variable_scope(self.config.fx_variable_scope) as scope:
+            with tf.variable_scope(self.config.fx_variable_scope, reuse=reuse) as scope:
 
                 logits = self.get_feature_net_mlp(xinput, output_size, reuse=reuse) # bs, output_num (159) x dimension
 
                 mult = logits * yinput # Element-wise multiplication [bs, output_num (159) x dimension]
                 local_e = tf.reduce_sum(mult, axis=1) # [bs,]
 
+            with tf.variable_scope(self.config.en_variable_scope, reuse=reuse) as scope:
+                j = 0
+                net = yinput # [bs, output_num (159) x dimension]
+                for (sz, a) in self.config.en_layer_info:
+                    net = tflearn.fully_connected(net, sz,
+                                                  weight_decay=self.config.weight_decay,
+                                                  weights_init=tfi.variance_scaling(),
+                                                  activation=a,
+                                                  bias=False,
+                                                  reuse=reuse, regularizer='L2',
+                                                  scope=("en.h" + str(j)))
 
-                #print "here", logits.get_shape().as_list(), yinput.get_shape().as_list(), mult.get_shape().as_list(), local_e.get_shape().as_list()
+                    j = j + 1
 
-                #local_e = tflearn.fully_connected(mult, 1, activation='linear', regularizer='L2',
-                #                                  weight_decay=self.config.weight_decay,
-                #                                  weights_init=tfi.variance_scaling(),
-                #                                  bias=False,
-                #                                  bias_init=tfi.zeros(), reuse=reuse, scope=("en.l"))
+                global_e = tf.squeeze(tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
+                                                   weights_init=tfi.variance_scaling(), bias=False,
+                                                   reuse=reuse, regularizer='L2',
+                                                   scope=("en.g")))
 
+        return tf.squeeze(tf.add(local_e, global_e))
+
+    def get_energy_mlp_expected(self, xinput=None, yinput=None, embedding=None, reuse=False):
+
+        """
+        :param xinput: [batch_size, num_features]
+        :param yinput: [batch_size, num_labels x label_dimension, num_structures]
+        :param embedding: embeddings for textual data
+        :param reuse: whether or not to reuse the alredy build computation graph
+        :return:
+        """
+
+        output_size = yinput.get_shape().as_list()[1] # scalar, i.e. output_num (159) x dimension i.e. num_labels x label_dimension
+
+        with tf.variable_scope(self.config.spen_variable_scope):
+            with tf.variable_scope(self.config.fx_variable_scope) as scope:
+                logits = self.get_feature_net_mlp(xinput, output_size, reuse=reuse) # bs, output_num (159) x label_dimension
+                mult = logits * yinput # Element-wise multiplication [bs, output_num (159) x dimension]
+                local_e = tf.reduce_sum(mult, axis=1) # [bs,]
 
             with tf.variable_scope(self.config.en_variable_scope) as scope:
                 j = 0
@@ -205,11 +234,6 @@ class EnergyModel:
                                                   reuse=reuse, regularizer='L2',
                                                   scope=("en.h" + str(j)))
 
-                    # net = tflearn.layers.normalization.batch_normalization(net, reuse=reuse, scope=("bn.d" + str(j)))
-                    # net = tflearn.activations.softplus(net)
-                    #net = tf.log(tf.exp(net) + self.config.temperature)
-                    # net = tflearn.dropout(net, 1.0 - self.config.dropout)
-                    # net = tf.contrib.layers.layer_norm(net, reuse=reuse, scope=("ln"+str(j)))
                     j = j + 1
 
                 global_e = tf.squeeze(tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
@@ -218,6 +242,7 @@ class EnergyModel:
                                                    scope=("en.g")))
 
         return tf.squeeze(tf.add(local_e, global_e))
+
 
     def get_energy_mlp_local(self, xinput=None, yinput=None, embedding=None, reuse=False):
         output_size = yinput.get_shape().as_list()[-1]

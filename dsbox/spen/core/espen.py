@@ -5,6 +5,7 @@ import tflearn
 import tflearn.initializations as tfi
 from enum import Enum
 import math
+import sys
 import random
 
 NEG_SAMPLES_PER_DATA_POINT = 5
@@ -26,13 +27,17 @@ class TrainingType(Enum):
 
 
 class SPEN:
+
     def __init__(self, config):
+
         self.config = config
         self.x = tf.placeholder(tf.float32, shape=[None, self.config.input_num], name="InputX")
         self.learning_rate_ph = tf.placeholder(tf.float32, shape=[], name="LearningRate")
         self.is_training = tf.placeholder(tf.float32, shape=[], name="IsTraining")
         self.dropout_ph = tf.placeholder(tf.float32, shape=[], name="Dropout")
         self.embedding = None
+
+        self.neg_samples = NEG_SAMPLES_PER_DATA_POINT
 
     def init(self):
         init_op = tf.global_variables_initializer()
@@ -209,46 +214,76 @@ class SPEN:
 
         self.margin_weight_ph = tf.placeholder(tf.float32, shape=[], name="Margin")
         self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
+
         self.yp_h_ind = tf.placeholder(tf.float32,
                                        shape=[None, self.config.output_num * self.config.dimension],
                                        name="YP_H")
 
+        # self.yp_l_ind = tf.placeholder(tf.float32,
+        #                                shape=[None, self.config.output_num * self.config.dimension*(self.neg_samples+1)],
+        #                                name="YP_L")
+
         self.yp_l_ind = tf.placeholder(tf.float32,
-                                       shape=[None, self.config.output_num * self.config.dimension],
+                                       shape=[None, self.config.output_num * self.config.dimension, self.neg_samples+1],
                                        name="YP_L")
+
+        # print(self.yp_l_ind)
+        # sys.stdout.flush()
 
         yp_ind_sm_h = tf.nn.softmax(tf.reshape(self.yp_h_ind, [-1, self.config.output_num, self.config.dimension]))
         # [batch_size x num_labels x softmax(label_dimension)]
-        self.yp_h = tf.reshape(yp_ind_sm_h, [-1, self.config.output_num * self.config.dimension])
-        # [[batch_size x num_labels] x softmax(label_dimension)]
 
-        yp_ind_sm_l = tf.nn.softmax(tf.reshape(self.yp_l_ind, [-1, self.config.output_num, self.config.dimension]))
-        # [batch_size x num_labels x softmax(label_dimension)]
+        self.yp_h = tf.reshape(yp_ind_sm_h, [-1, self.config.output_num * self.config.dimension])
+        # [batch_size, num_labels x softmax(label_dimension)]
+
+        #yp_l_ind_t = tf.reshape(self.yp_l_ind, [-1, self.config.output_num * self.config.dimension, self.neg_samples+1])
+
+        yp_ind_sm_l = tf.nn.softmax(tf.reshape(self.yp_l_ind[:, :, 0], [-1, self.config.output_num, self.config.dimension]))
+
         self.yp_l = tf.reshape(yp_ind_sm_l, [-1, self.config.output_num * self.config.dimension])
-        # [[batch_size x num_labels] x softmax(label_dimension)]
 
         self.value_h = tf.placeholder(tf.float32, shape=[None])
         # Float scalar value
-        self.value_l = tf.placeholder(tf.float32, shape=[None])
+        self.value_l = tf.placeholder(tf.float32, shape=[None, self.neg_samples + 1])
         # Float scalar value
 
-        self.yh_penalty = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(self.yp_h_ind), 1)
+        value_l_yp = self.value_l[:, 0]
+
+        self.yh_penalty = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(self.yp_h_ind), 1) # [bs]
         # scalar: inference penalty sum, we square along the label dimension and sum it
 
-        self.yl_penalty = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(self.yp_l_ind), 1)
+        self.yl_penalty = self.inf_penalty_weight_ph * tf.reduce_sum(tf.square(self.yp_l_ind), 1)  # [bs, ns+1]
         # same as above
 
         self.energy_yh_ = self.get_energy(xinput=self.x, yinput=self.yp_h, embedding=self.embedding,
                                           reuse=False)  # - self.yh_penalty
-        # inputs: self.x: bs x nf  and yp_h: bs, output_num (159) x dimension i.e. num_labels x label_dimension
-        # output is a scalar
-
-        self.energy_yl_ = self.get_energy(xinput=self.x, yinput=self.yp_l, embedding=self.embedding,
-                                          reuse=True)  # - self.yl_penalty
-        # save as previous
-
+        # # inputs: self.x: bs x nf  and yp_h: bs, output_num (159) x dimension i.e. num_labels x label_dimension
+        # # output is a scalar
+        #
+        # self.energy_yl_ = self.get_energy(xinput=self.x, yinput=self.yp_l, embedding=self.embedding,
+        #                                   reuse=True)  # - self.yl_penalty
+        # # save as previous
+        #
         self.energy_yh = self.energy_yh_ - self.yh_penalty
-        self.energy_yl = self.energy_yl_ - self.yl_penalty
+        # self.energy_yl = self.energy_yl_ - self.yl_penalty
+        # self.energy_yh = self.all_energies[:, 0] - self.yh_penalty # [bs]
+
+
+        all_x_1 = tf.reshape(self.x, [-1])
+        all_x_2 = tf.tile(all_x_1, tf.constant([self.neg_samples + 1]))
+        all_x = tf.reshape(all_x_2, [-1, self.x.shape[1]])
+        # above should be [bs x (self.neg_samples + 1), num_features]
+
+        t_yp_ind_sm_l = tf.reshape(self.yp_l_ind, [-1, self.config.output_num, self.config.dimension, self.neg_samples + 1])
+        t_yp_ind_sm_l = tf.nn.softmax(t_yp_ind_sm_l, 2)
+        t_yp_ind_sm_l = tf.reshape(t_yp_ind_sm_l, [-1, self.config.output_num*self.config.dimension, self.neg_samples + 1])
+        all_y = tf.transpose(t_yp_ind_sm_l, [0, 2, 1]) # tf.concat([tf.expand_dims(self.yp_h, 2), t_yp_ind_sm_l], 2)
+        all_y = tf.reshape(all_y, [-1, self.config.dimension * self.config.output_num])
+        # above should be [bs x (self.neg_samples + 1), num_labels x label_dimension]
+
+        self.energies_yl_ = tf.reshape(self.get_energy(xinput=all_x, yinput=all_y, embedding=self.embedding, reuse=True), [-1, self.neg_samples+1])
+        self.energy_yl = tf.reduce_mean(self.energies_yl_ - self.yl_penalty, 1)  # [bs]
+
 
         self.yp_ind = self.yp_h_ind
         self.yp = self.yp_h
@@ -260,7 +295,10 @@ class SPEN:
 
         self.ce = -tf.reduce_sum(self.yp_h * tf.log(tf.maximum(self.yp_l, 1e-20)), 1)   # [[batch_size x num_labels] x softmax(label_dimension)] -- cross entropy computation on the third dimension
 
-        self.diff = (self.value_h - self.value_l) * self.margin_weight_ph       # difference between values
+        self.diff = (self.value_h - value_l_yp) * self.margin_weight_ph       # difference between values
+
+        # self.objective = tf.reduce_sum(tf.maximum(-self.energy_yh + self.energy_yl + self.diff, 0.0)) \
+        #                  + self.config.l2_penalty * self.get_l2_loss()  # L2 regularization with margin loss
 
         self.objective = tf.reduce_sum(tf.maximum(-self.energy_yh + self.energy_yl + self.diff, 0.0)) \
                          + self.config.l2_penalty * self.get_l2_loss()  # L2 regularization with margin loss
@@ -268,7 +306,7 @@ class SPEN:
         self.num_update = tf.reduce_sum(tf.cast((self.diff > (self.energy_yh - self.energy_yl)), tf.float32))   # tracks number of points that are useful for gradient updates
 
         self.vh_sum = tf.reduce_mean(self.value_h)      # takes mean over the batch
-        self.vl_sum = tf.reduce_mean(self.value_l)      # takes mean over the batch
+        self.vl_sum = tf.reduce_mean(value_l_yp)      # takes mean over the batch
         self.eh_sum = tf.reduce_mean(self.energy_yh)    # takes mean over the batch
         self.el_sum = tf.reduce_mean(self.energy_yl)    # takes mean over the batch
 
@@ -622,11 +660,10 @@ class SPEN:
                 x.append(xinput[i])
 
         x = np.array(x)
-        fh = np.array(fh)       # Evaluation score for correct structure
-        fl = np.array(fl)       # Evaluation score for incorrect structure
-        yh = np.array(yh)       # Output configuration for correct structure
-        yl = np.array(yl)       # Output configuration for incorrect structure
-
+        fh = np.array(fh)  # Evaluation score for correct structure
+        fl = np.array(fl)  # Evaluation score for incorrect structure
+        yh = np.array(yh)  # Output configuration for correct structure
+        yl = np.array(yl)
         return x, yh, yl, fh, fl
 
 
@@ -653,8 +690,10 @@ class SPEN:
         return yp
 
 
-    def map_predict(self, xinput=None, yinit=None, train=False, inf_iter=None, ascent=True, end2end=False,
+    def map_predict(self, xinput=None, yinit=None, train=False,
+                    inf_iter=None, ascent=True, end2end=False,
                     continuous=False):
+
         yp = self.soft_predict(xinput=xinput, yinit=yinit, train=train, inf_iter=inf_iter, ascent=ascent,
                                end2end=end2end)
         if self.config.dimension == 1:
@@ -769,30 +808,37 @@ class SPEN:
 
                     # Adding more negative samples
                     more_samples_from_yp = self.get_more_samples_from_yp(yp[i])
-                    for sample_index in range(NEG_SAMPLES_PER_DATA_POINT):
+                    for sample_index in range(self.neg_samples):
 
-                        # Adding sample
+                        # Adding sample information from prediction distribution
                         fp = self.evaluate(xinput=xinput[i], yinput=np.expand_dims(np.argmax(more_samples_from_yp[sample_index], 1), 0), yt=np.expand_dims(yinput[i], 0))
                         yl.append(more_samples_from_yp[sample_index].flatten())
+                        fl.append(fp[0])
 
                         # Adding corresponding ground truth and input
-                        fh.append(fb[0])
-                        fl.append(fp[0])
-                        yh.append(yb[i])
-                        x.append(xinput[i])
-
-
+                        #fh.append(fb[0])
+                        #yh.append(yb[i])
+                        #x.append(xinput[i])
                 else:
                     raise NotImplementedError
 
+        # input variable
+        x = np.array(x)  # [batch_size, num_features]
 
-        x = np.array(x)
-        fh = np.array(fh)  # Evaluation score for correct structure
-        fl = np.array(fl)  # Evaluation score for incorrect structure
-        yh = np.array(yh)  # Output configuration for correct structure
-        yl = np.array(yl)  # Output configuration for incorrect structure
+        # Evaluation score for correct structure
+        fh = np.array(fh)  # [batch_size]
+
+        # Evaluation score for incorrect structure
+        fl = np.array(fl).reshape(-1, self.neg_samples + 1)   # [batch_size, self.neg_samples+1]
+
+        # Output configuration for correct structure
+        yh = np.array(yh)  # [batch_size, num_labels, label_dimension]
+
+        # Output configuration for incorrect structure # [batch_size, num_labels x label_dimension, self.neg_samples+1]
+        yl = np.array(yl).reshape(-1, self.neg_samples+1, yh.shape[1]*yh.shape[2]).swapaxes(1,2)
 
         return x, yh, yl, fh, fl
+
 
     def train_expected_supervised_batch(self, xbatch=None, ybatch=None, yinit=None, verbose=0):
         tflearn.is_training(True, self.sess)
@@ -807,7 +853,9 @@ class SPEN:
 
             x_b, y_h, y_l, l_h, l_l = self.get_expected_prediction_samples(xinput=xbatch, yinput=ybatch, yinit=yinit,
                                                                ascent=True)
-            dist = np.linalg.norm(np.reshape(y_h, y_l.shape) - y_l)
+
+            dist = 0 #np.linalg.norm(np.reshape(y_h, y_l.shape) - y_l) TODO: change this with newly modified negative samples
+
             total = np.size(l_h)
             indices = np.arange(0, total)
             # for b in range(total/bs + 1 ):
@@ -822,7 +870,7 @@ class SPEN:
                  self.eh_sum, self.el_sum],
                 feed_dict={self.x: x_b, # (600, 1836) --> bs, nf
                            self.yp_h_ind: np.reshape(y_h, (-1, self.config.output_num * self.config.dimension)), # (600, 318) --> bs, output_num (159) x dimension i.e. num_labels x label_dimension
-                           self.yp_l_ind: np.reshape(y_l, (-1, self.config.output_num * self.config.dimension)), # (600, 318) --> bs, output_num (159) x dimension
+                           self.yp_l_ind: y_l, # (600, 318) --> bs, output_num (159) x dimension
                            self.value_l: l_l, # bs -- task loss value for lower configuration
                            self.value_h: l_h, # bs -- task loss value for higher configuration
                            self.learning_rate_ph: self.config.learning_rate,  # learning rate : scalar
@@ -830,10 +878,11 @@ class SPEN:
                            self.inf_penalty_weight_ph: self.config.inf_penalty, # penalty : which is set to zero at the moment
                            self.margin_weight_ph: self.config.margin_weight})   # margin_weight : also scalar
 
-            if verbose > 0:
-                # print("************************************************************************************************")
-                print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0],
-                      np.average(l_l))
+            # TODO: Implement with this considering new changes
+            # if verbose > 0:
+            #     # print("************************************************************************************************")
+            #     print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0],
+            #           np.average(l_l))
         return
 
     def save(self, path):
