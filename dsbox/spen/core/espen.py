@@ -8,8 +8,9 @@ import math
 import sys
 import random
 
-SAMPLES_PER_DATA_POINT = 5
 
+SAMPLE_TOP_K = True
+SAMPLES_PER_DATA_POINT = 5
 
 class InfInit(Enum):
     Random_Initialization = 1
@@ -37,7 +38,9 @@ class SPEN:
         self.dropout_ph = tf.placeholder(tf.float32, shape=[], name="Dropout")
         self.embedding = None
 
+        # TODO: shift these to configurations
         self.samples = SAMPLES_PER_DATA_POINT
+        self.is_sample_top_k = SAMPLE_TOP_K
 
     def init(self):
         init_op = tf.global_variables_initializer()
@@ -719,18 +722,122 @@ class SPEN:
                 print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0], np.average(l_l))
         return
 
+    @staticmethod
+    def find_k_best(prob_dist, sum_log_values, labels, first_time=False, yp_samples=None):
+
+        def number_to_base(n, b, num_bits=-1):
+            if n == 0:
+                return [0] if num_bits < 1 else [0]*num_bits
+            digits = []
+            while n:
+                digits.append(int(n % b))
+                n //= b
+            digits = digits[::-1]
+            if num_bits > len(digits):
+                digits = [0]*(num_bits - len(digits)) + digits
+            return digits
+
+        num_samples = len(sum_log_values)
+        output_num, dimension = prob_dist.shape
+
+        temp_samples = []
+        temp_samples_sum_log_score = []
+
+        if first_time:
+
+            temp_total_samples = dimension ** len(labels)
+
+            for sample_index in range(temp_total_samples):
+                temp_samples += number_to_base(sample_index, dimension, len(labels)),
+
+                temp_score = 0
+
+                for label_index, label_value in zip(labels, temp_samples[-1]):
+                    temp_score += np.log(prob_dist[label_index, label_value])
+                temp_samples_sum_log_score += temp_score,
+
+            # Collecting top configurations
+            temp_samples_sum_log_score = np.array(temp_samples_sum_log_score)
+            top_k_elements_indices = temp_samples_sum_log_score.argsort()[-num_samples:][::-1]
+
+            top_k_elements = [temp_samples[element_index] for element_index in top_k_elements_indices]
+            top_k_elements_score = [temp_samples_sum_log_score[element_index] for element_index in top_k_elements_indices]
+
+            return np.array(top_k_elements), np.array(top_k_elements_score)
+
+        else:
+
+            label_value = labels
+
+            for sample_index in range(num_samples):
+                for dimension_index in range(dimension):
+                    temp_samples_sum_log_score \
+                        += sum_log_values[sample_index] + np.log(prob_dist[label_value, dimension_index]),
+
+            temp_samples_sum_log_score = np.array(temp_samples_sum_log_score)
+            top_k_elements_indices = temp_samples_sum_log_score.argsort()[-num_samples:][::-1]
+
+            top_k_elements = np.zeros((num_samples, yp_samples.shape[1] + 1))
+            top_k_elements_score = np.zeros(num_samples)
+
+            for top_k_element_index, element_index in enumerate(top_k_elements_indices):
+
+                sample_index = element_index // dimension
+                dimension_index = element_index % dimension
+
+                top_k_elements[top_k_element_index, :-1] = yp_samples[sample_index, :]
+                top_k_elements[top_k_element_index, -1] = dimension_index
+
+                top_k_elements_score[top_k_element_index] \
+                    = sum_log_values[sample_index] + temp_samples_sum_log_score[element_index]
+
+            return top_k_elements, top_k_elements_score
+
     def get_more_samples_from_yp(self, prob_dist, num_samples=SAMPLES_PER_DATA_POINT):
+        """
+        :param prob_dist: current prediction matrix [output_num x dimension]
+        :param num_samples: number of samples from this distribution
+        :return:
+        """
 
-        # self.config.output_num -- label dimension
-        # self.config.dimension -- number of labels
+        if self.is_sample_top_k:
 
-        cum_prob_dist = np.cumsum(prob_dist, axis=1)
-        samples = np.random.uniform(0, 1, num_samples * self.config.output_num).reshape(num_samples, self.config.output_num)
+            n_len = 0
+            while self.config.dimension ** n_len < num_samples:
+                n_len += 1
 
-        samples = np.where(samples[:, np.newaxis] - cum_prob_dist.T > 0, 0, 1).swapaxes(1, 2).reshape(num_samples*self.config.output_num, self.config.dimension)
-        yp_samples =  np.zeros_like(samples)
-        yp_samples[np.arange(samples.shape[0]), np.argmax(samples, axis=1)] = 1
-        return yp_samples.reshape(num_samples, self.config.output_num, self.config.dimension)
+            sum_log_values = np.zeros(num_samples)
+            label_order = np.random.permutation(prob_dist.shape[0])
+
+            yp_samples = - 1 * np.ones((num_samples, self.config.output_num))  # 1 out of N representation
+            yp_samples[:, :n_len], sum_log_values \
+                = self.find_k_best(prob_dist, sum_log_values, label_order[0:n_len], first_time=True)
+
+            for index_val in range(n_len, self.config.output_num):
+
+                tp_samples = yp_samples[:, :index_val]
+                yp_samples[:, :index_val+1], sum_log_values \
+                    = self.find_k_best(prob_dist, sum_log_values, label_order[index_val],
+                                       yp_samples=tp_samples)
+
+            # 1 hot representation
+            final_yp_samples = np.zeros((num_samples, self.config.output_num, self.config.dimension))
+
+            for sample_index in range(num_samples):
+                for label_index in range(self.config.output_num):
+                    final_yp_samples[sample_index, label_index, int(yp_samples[sample_index, label_index])] = 1
+            return final_yp_samples
+        else:
+            cum_prob_dist = np.cumsum(prob_dist, axis=1)
+            samples = np.random.uniform(0, 1, num_samples * self.config.output_num).reshape(num_samples,
+                                                                                            self.config.output_num)
+
+            samples = np.where(samples[:, np.newaxis] - cum_prob_dist.T > 0, 0, 1).swapaxes(1, 2).reshape(
+                num_samples * self.config.output_num, self.config.dimension)
+            yp_samples = np.zeros_like(samples)
+            yp_samples[np.arange(samples.shape[0]), np.argmax(samples, axis=1)] = 1
+
+            return yp_samples.reshape(num_samples, self.config.output_num, self.config.dimension)
 
     def get_expected_prediction_samples(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True):
 
