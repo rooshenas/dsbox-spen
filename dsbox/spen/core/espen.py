@@ -7,6 +7,8 @@ from enum import Enum
 import math
 import random
 
+NEG_SAMPLES_PER_DATA_POINT = 5
+
 
 class InfInit(Enum):
     Random_Initialization = 1
@@ -116,6 +118,7 @@ class SPEN:
 
 
     def rank_based_training(self):
+
         self.margin_weight_ph = tf.placeholder(tf.float32, shape=[], name="Margin")
         self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
         self.yp_h_ind = tf.placeholder(tf.float32,
@@ -274,14 +277,24 @@ class SPEN:
 
 
     def inference(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True, train=False):
+
         if self.config.loglevel > 5:
-            print("inferece")
+            print("Inside inference: ...")
+
         if inf_iter is None:
-            inf_iter = self.config.inf_iter
+            inf_iter = self.config.inf_iter # TODO: local variable inf_iter is never used
+
         tflearn.is_training(is_training=train, session=self.sess)
-        size = np.shape(xinput)[0]
+
+        size = list(np.shape(xinput))[0]
+
+        # Pre-paring yt_ind (true labels) and yp_ind (initial predictions)
+        # if yp_init is not provided then it is initialized randomly
+        # Interestingly yt_ind is not utilized for rank based training
+
         if yinput is not None:
             yt_ind = np.reshape(yinput, (-1, self.config.output_num * self.config.dimension))
+
         if yinit is not None:
             if yinit.shape[0] > 1:
                 pass
@@ -291,30 +304,24 @@ class SPEN:
         else:
             yp_ind = np.random.uniform(0, 1, (size, self.config.output_num * self.config.dimension))
 
-        # y = np.full((size, self.config.output_num), fill_value=5)
-        # y = np.random.randint(0, self.config.dimension, (size, self.config.output_num))
-        # y = np.zeros(shape=(size, self.config.output_num))
-        # yp_ind = np.reshape(self.var_to_indicator(y), (-1, self.config.output_num* self.config.dimension))
-        # yp_ind = np.zeros((size, self.config.output_num * self.config.dimension))
-        # yp_ind = self.project_simplex_norm(yp_ind)
         i = 0
         yp_a = []
-        g_m = np.zeros(np.shape(yp_ind))
+        g_m = np.zeros(np.shape(yp_ind))  # Gradient momentum, why not use inbuilt moment things?
         alpha = self.config.alpha
         mean = np.zeros(shape=np.shape(yp_ind))
         avg_gnorm = 100.0
 
-        # vars = self.sess.run(self.energy_variables())
-        # print "W: ", np.sum(np.square(vars))
         it = 0
         while avg_gnorm > self.config.gradient_thresh and it < self.config.inf_iter:
 
+            # Forward pass and provide output yp
             feed_dict = {self.x: xinput, self.yp_ind: yp_ind,
                          self.margin_weight_ph: self.config.margin_weight,
                          self.inf_penalty_weight_ph: self.config.inf_penalty,
                          self.dropout_ph: self.config.dropout}
             yp = self.sess.run(self.yp_h, feed_dict=feed_dict)
 
+            # Backward pass over the inference procedure
             if yinput is not None:
                 feed_dict = {self.x: xinput, self.yp_ind: yp_ind, self.yt_ind: yt_ind,
                              self.margin_weight_ph: self.config.margin_weight,
@@ -325,38 +332,33 @@ class SPEN:
                              self.margin_weight_ph: self.config.margin_weight,
                              self.inf_penalty_weight_ph: self.config.inf_penalty,
                              self.dropout_ph: self.config.dropout}
-
             g, e = self.sess.run([self.inf_gradient, self.inf_objective], feed_dict=feed_dict)
-            # print yp.shape
 
-            g = np.clip(g, a_min=-1.0, a_max=1.0)
+            # Checking gradients and making updates
+            g = np.clip(g, a_min=-1.0, a_max=1.0)       # TODO: shouldn't we take this out and tune it?
             gnorm = np.linalg.norm(g, axis=1)
-            # yp = self.softmax2(np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension)), axis=2, theta=self.config.temperature)
             avg_gnorm = np.average(gnorm)
-            # print avg_gnorm
-            # g = np.clip(g,-10, 10)
+
             if train:
-                # noise = np.random.normal(mean, inf_iter*np.abs(g) / math.sqrt((1+i)), size=np.shape(g))
-                noise = np.random.normal(mean, self.config.noise_rate * np.average(gnorm) / math.sqrt((1 + it)),
-                                         size=np.shape(g))
-            # #noise = np.random.normal(mean, np.abs(g), size=np.shape(g))
+                noise = np.random.normal(mean, self.config.noise_rate * np.average(gnorm) / math.sqrt((1 + it)), size=np.shape(g))
             else:
                 noise = np.zeros(shape=np.shape(g))
-            # #noise = np.random.normal(mean, 100.0 / math.sqrt(1+i), size=np.shape(g))
+
+            # Gradient update -- alpha is a scalar for gradient momentum
+            # No noise if not training
             g_m = alpha * (g + noise) + (1 - alpha) * g_m
+
             if ascent:
-                yp_ind = yp_ind + (self.config.inf_rate) * (g_m)
-                # yp_ind = yp_ind + (self.config.inf_rate / math.sqrt((1+it))) * (g+noise)
+                yp_ind = yp_ind + self.config.inf_rate * g_m
             else:
-                yp_ind = yp_ind - self.config.inf_rate * (g_m)
+                yp_ind = yp_ind - self.config.inf_rate * g_m
 
             if self.config.loglevel > 5:
-                # yr = np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension))
+
                 ypn = self.softmax(yp_ind, axis=-1)
                 print("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
                       "gnorm:", np.average(gnorm), "yp:", np.average(np.max(ypn, 2)))
 
-            # yp_a.append(np.reshape(yp, (-1, self.config.output_num* self.config.dimension)))
             yp_a.append(np.reshape(yp, (-1, self.config.output_num * self.config.dimension)))
             it += 1
 
@@ -448,8 +450,11 @@ class SPEN:
         return final_best, found_point
 
     def get_training_points(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True):
+
+        # TODO: Why this assignment is done here?
         self.inf_objective = self.energy_yp
         self.inf_gradient = self.energy_ygradient
+
 
         y_a = self.inference(xinput=xinput, yinit=yinit, train=True, ascent=ascent, inf_iter=inf_iter)
         y_ans = y_a[-1]
@@ -462,28 +467,17 @@ class SPEN:
         yp = self.sess.run(self.yp_h, feed_dict={self.yp_h_ind: y_ans})
         yp = np.reshape(yp, (-1, self.config.output_num, self.config.dimension))
 
-        # yp = self.softmax(y_ans, axis=-1)
-        # en_a = np.array([self.sess.run(self.inf_objective,
-        #                               feed_dict={self.x: xinput,
-        #                                          self.yp_ind: np.reshape(y_i, (
-        #                                            -1, self.config.output_num * self.config.dimension)),
-        #                                          self.inf_penalty_weight_ph: self.config.inf_penalty,
-        #                                          self.dropout_ph: self.config.dropout})
-        #                 for y_i in y_a])
-        # ind = np.argmax(en_a, 0) if ascent else np.argmin(en_a, 0)
-        # yp_ind = np.array([y_a[ind[i], i, :] for i in range(np.shape(xinput)[0])])
-        # en_p = [en_a[ind[i], i] for i in range(np.shape(xinput)[0])]
 
-
-
-
-        if self.config.use_search:
+        if self.config.use_search: # this step is not used for supervised training
             y_better, found = self.search_better_y_fast(xinput, np.argmax(yp, 2), yp, yt=yinput)
         else:
             y_better = yinput
             found = np.ones(yp.shape[0])
         yb = self.var_to_indicator(y_better)
-        if self.config.loglevel > 30:
+
+
+
+        if self.config.loglevel > 30:   # TODO: Remove these magic numbers
             en_better = np.array(self.sess.run(self.inf_objective,
                                                feed_dict={self.x: xinput,
                                                           self.yp_ind: np.reshape(yb, (
@@ -504,6 +498,9 @@ class SPEN:
         yl = []
         x = []
 
+        # TODO: Can we get rid of this loop? It should be possible as long as we can run self.evaluate in batch
+        # What is the use of found? Is it relevant for my task.
+        # Its running over batch samples
         for i in range(yp.shape[0]):
 
             if found[i] > 0:
@@ -528,10 +525,10 @@ class SPEN:
                 x.append(xinput[i])
 
         x = np.array(x)
-        fh = np.array(fh)
-        fl = np.array(fl)
-        yh = np.array(yh)
-        yl = np.array(yl)
+        fh = np.array(fh)       # Evaluation score for correct structure
+        fl = np.array(fl)       # Evaluation score for incorrect structure
+        yh = np.array(yh)       # Output configuration for correct structure
+        yl = np.array(yl)       # Output configuration for incorrect structure
 
         return x, yh, yl, fh, fl
 
@@ -553,33 +550,8 @@ class SPEN:
             self.inf_gradient = self.energy_ygradient
             y_a = self.inference(xinput=xinput, yinit=yinit, inf_iter=inf_iter, train=train, ascent=ascent)
 
-            # en_a = np.array([self.sess.run(self.energy_yp,
-            #                   feed_dict={self.x: xinput,
-            #                              self.yp_ind: np.reshape(y_i, (-1, self.config.output_num * self.config.dimension)),
-            #                              self.inf_penalty_weight_ph: self.config.inf_penalty,
-            #                              self.dropout_ph: self.config.dropout}) for y_i in y_a])
-            # #try:
-            # if self.config.loglevel > 5:
-            #       for i in range(len(en_a)):
-            #         y_i = y_a[i]
-            #         f_i = np.array(self.evaluate(xinput=xinput, yinput=np.argmax(y_i, 2)))
-            #         print ("----------------------------")
-            #         print (i, np.average(en_a[i,:]), np.average(f_i))
-
-            # y_ans = y_a[-1]
-
-            # f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(y_i,2)) for y_i in y_a])
-            # for t in range(xinput.shape[0]):
-            #  print ("t = " + str(t)  + " energy: " + str(en_a[-1,t]))
-            # ind = np.argmax(en_a,0) if ascent else np.argmin(en_a, 0)
-            # y_ans = np.array([y_a[ind[i],i,:] for i in range(np.shape(xinput)[0])])
-
-            # except:
             y_ans = y_a[-1]
-            #yp = self.sess.run(self.yp_h, feed_dict={self.yp_h_ind: y_ans})
             yp = np.reshape(y_ans, (-1, self.config.output_num, self.config.dimension))
-            #yp = self.softmax(y_ans, axis=-1)
-            #yp = np.reshape(y_ans, (-1, self.config.output_num, self.config.dimension))
 
         return yp
 
@@ -592,8 +564,6 @@ class SPEN:
             return np.squeeze(yp)
         else:
             return np.argmax(yp, 2)
-
-    # def inference_trajectory(self):
 
 
     def train_batch(self, xbatch=None, ybatch=None, verbose=0):
@@ -641,7 +611,133 @@ class SPEN:
                 print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0], np.average(l_l))
         return
 
+    def get_more_samples_from_yp(self, prob_dist):
 
+        # self.config.output_num -- label dimension
+        # self.config.dimension -- number of labels
+
+        cum_prob_dist = np.cumsum(prob_dist, axis=1)
+        samples = np.random.uniform(0, 1, NEG_SAMPLES_PER_DATA_POINT * self.config.output_num).reshape(NEG_SAMPLES_PER_DATA_POINT, self.config.output_num)
+
+        samples = np.where(samples[:, np.newaxis] - cum_prob_dist.T > 0, 0, 1).swapaxes(1, 2).reshape(NEG_SAMPLES_PER_DATA_POINT *self.config.output_num, self.config.dimension)
+        yp_samples =  np.zeros_like(samples)
+        yp_samples[np.arange(samples.shape[0]), np.argmax(samples, axis=1)] = 1
+        return yp_samples.reshape(NEG_SAMPLES_PER_DATA_POINT, self.config.output_num, self.config.dimension)
+
+    def get_expected_prediction_samples(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True):
+
+        self.inf_objective = self.energy_yp
+        self.inf_gradient = self.energy_ygradient
+
+        y_a = self.inference(xinput=xinput, yinit=yinit, train=True, ascent=ascent, inf_iter=inf_iter)
+        y_ans = y_a[-1]
+        y_ans = np.reshape(y_ans, (-1, self.config.output_num, self.config.dimension))
+        y_ans = np.argmax(y_ans, -1)
+
+        y_ans = self.var_to_indicator(y_ans)
+        y_ans = np.reshape(y_ans, (-1, self.config.output_num * self.config.dimension))
+
+        yp = self.sess.run(self.yp_h, feed_dict={self.yp_h_ind: y_ans})
+        yp = np.reshape(yp, (-1, self.config.output_num, self.config.dimension))
+
+        if self.config.use_search:  # this step is not used for supervised training
+            raise NotImplementedError
+        else:
+            y_better = yinput
+            found = np.ones(yp.shape[0])
+        yb = self.var_to_indicator(y_better)
+
+        # y_a = np.array([yp, y_better])
+        fh, fl, yh, yl, x = [], [], [], [], []
+
+        # TODO: Can we get rid of this loop? It should be possible as long as we can run self.evaluate in batch
+        # What is the use of found? Is it relevant for my task.
+        # Its running over batch samples
+        for i in range(yp.shape[0]):
+
+            if found[i] > 0:
+                if yinput is not None:
+
+                    # Adding the current prediction and ground truth pair
+                    fp = self.evaluate(xinput=xinput[i], yinput=np.expand_dims(np.argmax(yp[i], 1), 0),
+                                       yt=np.expand_dims(yinput[i], 0))
+                    fb = self.evaluate(xinput=xinput[i], yinput=np.expand_dims(y_better[i], 0),
+                                       yt=np.expand_dims(yinput[i], 0))
+                    fh.append(fb[0])
+                    fl.append(fp[0])
+                    yh.append(yb[i])
+
+                    yl.append(y_ans[i])
+                    x.append(xinput[i])
+
+                    # Adding more negative samples
+                    more_samples_from_yp = self.get_more_samples_from_yp(yp[i])
+                    for sample_index in range(NEG_SAMPLES_PER_DATA_POINT):
+
+                        # Adding sample
+                        fp = self.evaluate(xinput=xinput[i], yinput=np.expand_dims(np.argmax(more_samples_from_yp[sample_index], 1), 0), yt=np.expand_dims(yinput[i], 0))
+                        yl.append(more_samples_from_yp[sample_index].flatten())
+
+                        # Adding corresponding ground truth and input
+                        fh.append(fb[0])
+                        fl.append(fp[0])
+                        yh.append(yb[i])
+                        x.append(xinput[i])
+
+
+                else:
+                    raise NotImplementedError
+
+
+        x = np.array(x)
+        fh = np.array(fh)  # Evaluation score for correct structure
+        fl = np.array(fl)  # Evaluation score for incorrect structure
+        yh = np.array(yh)  # Output configuration for correct structure
+        yl = np.array(yl)  # Output configuration for incorrect structure
+
+        return x, yh, yl, fh, fl
+
+    def train_expected_supervised_batch(self, xbatch=None, ybatch=None, yinit=None, verbose=0):
+        tflearn.is_training(True, self.sess)
+
+        bs = 50
+
+        n1 = 100000.0
+        it = 0
+
+        while it < 1:
+            it += 1
+
+            x_b, y_h, y_l, l_h, l_l = self.get_expected_prediction_samples(xinput=xbatch, yinput=ybatch, yinit=yinit,
+                                                               ascent=True)
+            dist = np.linalg.norm(np.reshape(y_h, y_l.shape) - y_l)
+            total = np.size(l_h)
+            indices = np.arange(0, total)
+            # for b in range(total/bs + 1 ):
+            if l_l.shape[0] <= 0:
+                print("skip")
+                return
+
+            # perm = np.random.permutation(range(total))
+            #  indices = perm[b * bs:(b + 1) * bs]
+            _, o1, g, n1, v1, v2, e1, e2 = self.sess.run(
+                [self.train_step, self.objective, self.grad_norm, self.num_update, self.vh_sum, self.vl_sum,
+                 self.eh_sum, self.el_sum],
+                feed_dict={self.x: x_b,
+                           self.yp_h_ind: np.reshape(y_h, (-1, self.config.output_num * self.config.dimension)),
+                           self.yp_l_ind: np.reshape(y_l, (-1, self.config.output_num * self.config.dimension)),
+                           self.value_l: l_l,
+                           self.value_h: l_h,
+                           self.learning_rate_ph: self.config.learning_rate,
+                           self.dropout_ph: self.config.dropout,
+                           self.inf_penalty_weight_ph: self.config.inf_penalty,
+                           self.margin_weight_ph: self.config.margin_weight})
+
+            if verbose > 0:
+                # print("************************************************************************************************")
+                print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0],
+                      np.average(l_l))
+        return
 
     def save(self, path):
         self.saver.save(self.sess, path)
