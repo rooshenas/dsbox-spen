@@ -717,6 +717,98 @@ class SPEN:
             g, e = self.sess.run([self.inf_gradient, self.inf_objective], feed_dict=feed_dict)
             # print yp.shape
 
+            g = np.clip(g, a_min=-1000.0, a_max=1000.0)
+            gnorm = np.linalg.norm(g, axis=1)
+            # yp = self.softmax2(np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension)), axis=2, theta=self.config.temperature)
+            avg_gnorm = np.average(gnorm)
+            # print avg_gnorm
+            # g = np.clip(g,-10, 10)
+            if train:
+                # noise = np.random.normal(mean, inf_iter*np.abs(g) / math.sqrt((1+i)), size=np.shape(g))
+                noise = np.random.normal(mean, self.config.noise_rate * np.average(gnorm) / math.sqrt((1 + it)),
+                                         size=np.shape(g))
+            # #noise = np.random.normal(mean, np.abs(g), size=np.shape(g))
+            else:
+                noise = np.zeros(shape=np.shape(g))
+            # #noise = np.random.normal(mean, 100.0 / math.sqrt(1+i), size=np.shape(g))
+            g_m = alpha * (g + noise) + (1 - alpha) * g_m
+            if ascent:
+                yp_ind = yp_ind + (self.config.inf_rate) * (g_m)
+                # yp_ind = yp_ind + (self.config.inf_rate / math.sqrt((1+it))) * (g+noise)
+            else:
+                yp_ind = yp_ind - self.config.inf_rate * (g_m)
+
+            if self.config.loglevel > 5:
+                # yr = np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension))
+                ypn = self.softmax(yp_ind, axis=-1)
+                print("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
+                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(ypn, 2)))
+
+            # yp_a.append(np.reshape(yp, (-1, self.config.output_num* self.config.dimension)))
+            yp_a.append(np.reshape(yp, (-1, self.config.output_num * self.config.dimension)))
+            it += 1
+
+        return np.array(yp_a)
+
+
+
+
+    def inference_old(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True, train=False):
+        if self.config.loglevel > 5:
+            print("inferece")
+        if inf_iter is None:
+            inf_iter = self.config.inf_iter
+        tflearn.is_training(is_training=train, session=self.sess)
+        size = np.shape(xinput)[0]
+        if yinput is not None:
+            yt_ind = np.reshape(yinput, (-1, self.config.output_num * self.config.dimension))
+        if yinit is not None:
+            if yinit.shape[0] > 1:
+                pass
+            else:
+                yinit = np.tile(np.reshape(yinit, (1, -1)), xinput.shape[0])
+            yp_ind = np.reshape(yinit, (xinput.shape[0], self.config.output_num * self.config.dimension))
+        else:
+            yp_ind = np.random.uniform(0, 1, (size, self.config.output_num * self.config.dimension))
+
+        # y = np.full((size, self.config.output_num), fill_value=5)
+        # y = np.random.randint(0, self.config.dimension, (size, self.config.output_num))
+        # y = np.zeros(shape=(size, self.config.output_num))
+        # yp_ind = np.reshape(self.var_to_indicator(y), (-1, self.config.output_num* self.config.dimension))
+        # yp_ind = np.zeros((size, self.config.output_num * self.config.dimension))
+        # yp_ind = self.project_simplex_norm(yp_ind)
+        i = 0
+        yp_a = []
+        g_m = np.zeros(np.shape(yp_ind))
+        alpha = self.config.alpha
+        mean = np.zeros(shape=np.shape(yp_ind))
+        avg_gnorm = 100.0
+
+        # vars = self.sess.run(self.energy_variables())
+        # print "W: ", np.sum(np.square(vars))
+        it = 0
+        while avg_gnorm > self.config.gradient_thresh and it < self.config.inf_iter:
+
+            feed_dict = {self.x: xinput, self.yp_ind: yp_ind,
+                         self.margin_weight_ph: self.config.margin_weight,
+                         self.inf_penalty_weight_ph: self.config.inf_penalty,
+                         self.dropout_ph: self.config.dropout}
+            yp = self.sess.run(self.yp_h, feed_dict=feed_dict)
+
+            if yinput is not None:
+                feed_dict = {self.x: xinput, self.yp_ind: yp_ind, self.yt_ind: yt_ind,
+                             self.margin_weight_ph: self.config.margin_weight,
+                             self.inf_penalty_weight_ph: self.config.inf_penalty,
+                             self.dropout_ph: self.config.dropout}
+            else:
+                feed_dict = {self.x: xinput, self.yp_ind: yp,
+                             self.margin_weight_ph: self.config.margin_weight,
+                             self.inf_penalty_weight_ph: self.config.inf_penalty,
+                             self.dropout_ph: self.config.dropout}
+
+            g, e = self.sess.run([self.inf_gradient, self.inf_objective], feed_dict=feed_dict)
+            # print yp.shape
+
             g = np.clip(g, a_min=-1.0, a_max=1.0)
             gnorm = np.linalg.norm(g, axis=1)
             # yp = self.softmax2(np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension)), axis=2, theta=self.config.temperature)
@@ -917,14 +1009,14 @@ class SPEN:
 
         y_a = self.inference(xinput=xinput, yinit=yinit, train=True, ascent=ascent, inf_iter=inf_iter)
         y_ans = y_a[-1]
-        y_ans = np.reshape(y_ans, (-1, self.config.output_num,self.config.dimension))
-        y_ans = np.argmax(y_ans, -1)
+        # y_ans = np.reshape(y_ans, (-1, self.config.output_num,self.config.dimension))
+        # y_ans = np.argmax(y_ans, -1)
 
-        y_ans = self.var_to_indicator(y_ans)
-        y_ans = np.reshape(y_ans, (-1, self.config.output_num*self.config.dimension))
+        # y_ans = self.var_to_indicator(y_ans)
+        # y_ans = np.reshape(y_ans, (-1, self.config.output_num*self.config.dimension))
 
-        yp = self.sess.run(self.yp_h, feed_dict={self.yp_h_ind: y_ans})
-        yp = np.reshape(yp, (-1, self.config.output_num, self.config.dimension))
+        # yp = self.sess.run(self.yp_h, feed_dict={self.yp_h_ind: y_ans})
+        yp = np.reshape(y_ans, (-1, self.config.output_num, self.config.dimension))
 
         # yp = self.softmax(y_ans, axis=-1)
         # en_a = np.array([self.sess.run(self.inf_objective,
@@ -1005,6 +1097,10 @@ class SPEN:
 
         y_a = self.inference(xinput=xinput, yinit=yinit, train=True, ascent=ascent, inf_iter=inf_iter)
 
+
+        y_a = y_a[-10:]
+
+
         en_a = np.array([self.sess.run(self.inf_objective,
                                        feed_dict={self.x: xinput,
                                                   self.yp_ind: np.reshape(y_i, (
@@ -1012,34 +1108,37 @@ class SPEN:
                                                   self.inf_penalty_weight_ph: self.config.inf_penalty,
                                                   self.dropout_ph: self.config.dropout})
                          for y_i in y_a])
-        ind = np.argmax(en_a, 0) if ascent else np.argmin(en_a, 0)
-        yp_ind = np.array([y_a[ind[i], i, :] for i in range(np.shape(xinput)[0])])
-        en_p = [en_a[ind[i], i] for i in range(np.shape(xinput)[0])]
-        yp = self.softmax(yp_ind, axis=-1)
+        # ind = np.argmax(en_a, 0) if ascent else np.argmin(en_a, 0)
+        # yp_ind = np.array([y_a[ind[i], i, :] for i in range(np.shape(xinput)[0])])
+        # en_p = [en_a[ind[i], i] for i in range(np.shape(xinput)[0])]
+        # yp = self.softmax(yp_ind, axis=-1)
 
-        if np.random.random() > 0.0:
-            print("search")
-            y_better, found = self.search_better_y_fast(xinput, np.argmax(yp, 2), yp, yt=yinput)
-            y_better = self.var_to_indicator(y_better)
 
-            y_a = np.array([yp, y_better])
 
-            # y_a = y_a[-4:]
 
-            en_better = np.array(self.sess.run(self.inf_objective,
-                                               feed_dict={self.x: xinput,
-                                                          self.yp_ind: np.reshape(y_better, (
-                                                              -1, self.config.output_num * self.config.dimension)),
-                                                          self.inf_penalty_weight_ph: self.config.inf_penalty,
-                                                          self.dropout_ph: self.config.dropout}))
-            print
-            np.shape(en_better)
-            en_a = np.array([en_p, en_better])
+        # if np.random.random() > 0.0:
+        #     print("search")
+        #     y_better, found = self.search_better_y_fast(xinput, np.argmax(yp, 2), yp, yt=yinput)
+        #     y_better = self.var_to_indicator(y_better)
+        #
+        #     y_a = np.array([yp, y_better])
+        #
+        #     # y_a = y_a[-4:]
+        #
+        #     en_better = np.array(self.sess.run(self.inf_objective,
+        #                                        feed_dict={self.x: xinput,
+        #                                                   self.yp_ind: np.reshape(y_better, (
+        #                                                       -1, self.config.output_num * self.config.dimension)),
+        #                                                   self.inf_penalty_weight_ph: self.config.inf_penalty,
+        #                                                   self.dropout_ph: self.config.dropout}))
+        #     print
+        #     np.shape(en_better)
+        #     en_a = np.array([en_p, en_better])
 
         # y_a = y_a[-2:]
         # en_a = en_a[-2:]
-
-        f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(y_i, 2), yt=yinput) for y_i in y_a])
+        f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(np.reshape(y_i, (-1, self.config.output_num, self.config.dimension)),2), yt=yinput) for y_i in y_a])
+        # f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(y_i, 2), yt=yinput) for y_i in y_a])
 
         # print (np.average(en_a, axis=1))
         # print (np.average(f_a, axis=1))
@@ -1060,8 +1159,8 @@ class SPEN:
         it = np.shape(y_a)[0]
         for k in range(it - 1):
             for i in t:
-                if found[i] < 1:
-                    continue
+                # if found[i] < 1:
+                #     continue
                 if f_a[k, i] > f_a[k + 1, i]:
                     i_h = k
                     i_l = k + 1
@@ -1074,9 +1173,9 @@ class SPEN:
                 e_h = en_a[i_h, i]
                 e_l = en_a[i_l, i]
 
-                # violation = (f_h - f_l) * self.config.margin_weight - e_h + e_l
-                # if violation > 0:
-                if found[i] > 0:
+                violation = (f_h - f_l) * self.config.margin_weight - e_h + e_l
+                if violation > 0 and f_h > f_l:
+                # if found[i] > 0:
                     f1.append(f_h)
                     f2.append(f_l)
                     y1.append((y_a[i_h, i, :]))
@@ -1154,11 +1253,14 @@ class SPEN:
 
         return x, y1, y2, f1, f2
 
-    def get_all_diff2(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True):
+    def get_all_diff(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True):
         self.inf_objective = self.energy_yp
         self.inf_gradient = self.energy_ygradient
         y_a = self.inference(xinput=xinput, inf_iter=inf_iter, train=True, ascent=ascent)
-        yp_a = np.array([self.softmax(yp) for yp in y_a])
+        # yp_a = np.array([self.softmax(yp) for yp in y_a])
+
+        yp_a = np.array([self.sess.run(self.yp_h, feed_dict={self.yp_h_ind: y_i}) for y_i in y_a])
+        # yp = np.reshape(yp, (-1, self.config.output_num, self.config.dimension))
 
         en_a = np.array([self.sess.run(self.inf_objective,
                                        feed_dict={self.x: xinput,
@@ -1166,12 +1268,15 @@ class SPEN:
                                                   -1, self.config.output_num * self.config.dimension)),
                                                   self.inf_penalty_weight_ph: self.config.inf_penalty,
                                                   self.dropout_ph: self.config.dropout})
-                         for y_i in y_a])
+                         for y_i in yp_a])
+
 
         # ce_a = np.array(
         #     [np.sum(yinput * np.log(1e-20 + np.reshape(y_p, (-1, self.config.output_num * self.config.dimension))), 1)
         #      for y_p in yp_a])
-        f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(y_i,2), yt=np.argmax(np.reshape(yinput, (-1, self.config.output_num, self.config.dimension)),2)) for y_i in y_a])
+        # print yinput.shape
+
+        f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(np.reshape(y_i, (-1, self.config.output_num, self.config.dimension)),2), yt=np.argmax(np.reshape(yinput, (-1, self.config.output_num, self.config.dimension)),2)) for y_i in yp_a])
 
         e_t = self.sess.run(self.inf_objective,
                             feed_dict={self.x: xinput,
@@ -1188,19 +1293,25 @@ class SPEN:
         y = []
         yp = []
         x = []
+        f1 = []
+        f2 = []
         it = np.shape(y_a)[0]
         for k in range(it-1):
             for i in t:
 
                 violation = (f_a[k+1,i]-f_a[k, i]) * self.config.margin_weight - e_t[i] + en_a[k, i]
-                print(e_t[i], en_a[k, i], ce_a[k, i], violation)
+                # print(e_t[i], en_a[k, i], ce_a[k, i], violation)
                 if violation > 0:
                     yp.append((y_a[k, i, :]))
                     x.append(xinput[i, :])
                     y.append(yinput[i, :])
+                    f1.append(f_a[k+1, i])
+                    f2.append(f_a[k, i])
         x = np.array(x)
         y = np.array(y)
         yp = np.array(yp)
+        f1 = np.array(f1)
+        f2 = np.array(f2)
 
         return x, y, yp
 
@@ -1381,17 +1492,12 @@ class SPEN:
 
     def train_unsupervised_rb_batch(self, xbatch=None, ybatch=None, yinit=None, verbose=0):
         tflearn.is_training(True, self.sess)
-
-        bs = 50
-
-        n1 = 100000.0
         it = 0
 
         while it < 1:
             it += 1
 
-            x_b, y_h, y_l, l_h, l_l = self.get_all_diff(xinput=xbatch, yinput=ybatch, yinit=yinit,
-                                                               ascent=True)
+            x_b, y_h, y_l, l_h, l_l = self.get_first_large_consecutive_diff(xinput=xbatch, yinput=ybatch, ascent=True)
             dist = np.linalg.norm(np.reshape(y_h, y_l.shape) - y_l)
             total = np.size(l_h)
             indices = np.arange(0, total)

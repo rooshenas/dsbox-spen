@@ -18,6 +18,7 @@ class TrainingType(Enum):
   Rank_Based = 3
   End2End = 4
   NDLM = 5
+  Adv = 6
 
 class SPEN:
   def __init__(self,config):
@@ -25,6 +26,8 @@ class SPEN:
     self.x = tf.placeholder(tf.float32, shape=[None, self.config.input_num], name="InputX")
     self.learning_rate_ph = tf.placeholder(tf.float32, shape=[], name="LearningRate")
     self.dropout_ph = tf.placeholder(tf.float32, shape=[], name="Dropout")
+    self.noise_rate_ph = tf.placeholder(tf.float32, shape=[], name="NoiseRate")
+    self.batch_size_ph = tf.placeholder(tf.int32, shape=[], name="BatchSize")
     self.embedding=None
 
   def init(self):
@@ -43,8 +46,43 @@ class SPEN:
     self.train_iter = iter
 
 
+  def construct_embedding(self, embedding_size, vocabulary_size):
+    self.vocabulary_size = vocabulary_size
+    self.embedding_size = embedding_size
+    self.embedding_placeholder = tf.placeholder(tf.float32, [self.vocabulary_size, self.embedding_size])
+
+    with tf.variable_scope(self.config.spen_variable_scope) as scope:
+      self.embedding = tf.get_variable("emb", shape=[self.vocabulary_size, self.embedding_size], dtype=tf.float32,
+                                       initializer=tfi.zeros(), trainable=True)
+    self.embedding_init = self.embedding.assign(self.embedding_placeholder)
+
+    return self
+
+  def createOptimizer(self):
+    self.optimizer = tf.train.AdamOptimizer(self.learning_rate_ph)
+
+  def construct(self, training_type = TrainingType.SSVM ):
+    if training_type == TrainingType.SSVM:
+      return self.ssvm_training()
+    elif training_type == TrainingType.Rank_Based:
+      return self.rank_based_training()
+    elif training_type == TrainingType.End2End:
+      return self.end2end_training()
+    elif training_type == TrainingType.Adv:
+      return self.adv_training()
+    elif training_type == TrainingType.NDLM:
+      return self.direct_loss_training()
+    else:
+      raise NotImplementedError
+
+
   def print_vars(self):
     for v in self.spen_variables():
+      print(v)
+
+
+  def print_loss_vars(self):
+    for v in self.loss_variables():
       print(v)
 
   def spen_variables(self):
@@ -58,6 +96,9 @@ class SPEN:
 
   def pred_variables(self):
     return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="spen/pred")
+
+  def loss_variables(self):
+    return tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="loss")
 
   def get_l2_loss(self):
     loss = 0.0
@@ -158,13 +199,15 @@ class SPEN:
     raise NotImplementedError
 
 
-  def value_training(self):
+  def adv_training(self):
     self.inf_penalty_weight_ph = tf.placeholder(tf.float32, shape=[], name="InfPenalty")
     self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
     self.yp_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYP")
-    y_start, features = self.get_initialization_net(self.x, self.config.output_num * self.config.dimension, embedding=self.embedding)
 
 
+    # y_start, features = self.get_initialization_net(self.x, self.config.output_num * self.config.dimension, embedding=self.embedding)
+
+    y_start = self.yp_ind
 
     current_yp_ind = y_start
     self.objective = 0.0
@@ -181,56 +224,50 @@ class SPEN:
     else:
       yp_ind = tf.nn.softmax(current_yp_ind)
 
+    self.generator_objective= 0.0
+    self.discriminator_objective = 0.0
     for i in range(int(self.config.inf_iter)):
-      penalty_current = 0.1*tf.reduce_sum(tf.square(current_yp_ind-y_start),1)
-      self.energy_y = self.get_energy(xinput=features, yinput=yp_ind, embedding=self.embedding, reuse=True if i > 0 else False) - penalty_current
+      # penalty_current = 0.1*tf.reduce_sum(tf.square(current_yp_ind-y_start),1)
+      self.energy_y = self.get_energy(xinput=self.x, yinput=yp_ind, embedding=self.embedding, reuse=True if i > 0 else False) #- penalty_current
       g = tf.gradients(self.energy_y, current_yp_ind)[0]
-      g = tf.clip_by_value(g, clip_value_min=-1.0, clip_value_max=1.0)
-      next_yp_ind = current_yp_ind + self.config.inf_rate * g
+      g = tf.clip_by_value(g, clip_value_min=-1000.0, clip_value_max=1000.0)
+      noise = tf.random_normal([self.batch_size_ph, self.config.output_num*self.config.dimension], 0.0, tf.linalg.norm(g)) * self.noise_rate_ph
+      next_yp_ind = current_yp_ind + self.config.inf_rate * (g)
       current_yp_ind = next_yp_ind
       if self.config.dimension > 1:
         yp_matrix = tf.reshape(current_yp_ind, [-1, self.config.output_num, self.config.dimension])
-        l = tf.reduce_sum(tf.nn.softmax_cross_entropy_with_logits(
-          logits=tf.reshape(current_yp_ind,(-1, self.config.output_num, self.config.dimension)),
-          labels=tf.reshape(self.yt_ind, (-1, self.config.output_num, self.config.dimension))))
-
         yp_current = tf.nn.softmax(yp_matrix, 2)
       else:
-        #yp_current = tf.clip_by_value(current_yp_ind, clip_value_min=0.0, clip_value_max=1.0)#
-        l_direct = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=self.yt_ind, logits=current_yp_ind))
         yp_current =  tf.nn.sigmoid(current_yp_ind)
 
-
-
-
       yp_ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
-      #l_direct = self.get_loss(self.yt_ind, yp_ind)
 
-      l = self.get_loss_network(ytrue=self.yt_ind, ypred=yp_ind, reuse=True if i > 0 else False)
+      # l = self.get_loss_network(ytrue=self.yt_ind, ypred=yp_ind, reuse=True if i > 0 else False)
+      # self.generator_objective += tf.reduce_sum(tf.square(l-1))
 
+      # self.generator_objective += tf.reduce_sum(-tf.log(l+1e-20))
+      # self.discriminator_objective += tf.reduce_sum(tf.log(l+1e-20))
       self.ind_ar.append(tf.reduce_mean(tf.norm(yp_current,1)))
-      self.l_ar.append(tf.reduce_mean(l))
+      # self.l_ar.append(l)
       self.en_ar.append(self.energy_y)
       self.g_ar.append(tf.reduce_mean(tf.norm(g,1)))
-      #self.objective = (1-self.config.alpha)*self.objective + self.config.alpha * l
-      #self.objective += (self.config.alpha / (self.config.inf_iter - i+1.0)) * l
       self.yp_ar.append(yp_current)
-      v = self.iou_loss(self.yt_ind, yp_ind)
-      self.v_ar.append(v)
-      self.ld_ar.append(l_direct)
 
-    #self.objective += self.config.l2_penalty * self.get_l2_loss()
 
-    self.objective = -tf.reduce_sum ((tf.reduce_sum(v * tf.log(tf.maximum(l, 1e-20)), 1) \
-       + tf.reduce_sum((1. - v) * tf.log(tf.maximum(1. - l , 1e-20)), 1)) ) + tf.reduce_sum(l)
+    l = self.get_loss_network(ytrue=self.yt_ind, ypred=yp_ind, reuse=False)
+    l_star  = self.get_loss_network(ytrue=self.yt_ind, ypred=self.yt_ind, reuse=True)
+    self.generator_objective = tf.reduce_sum(tf.square(l))
+    # self.generator_objective += self.config.l2_penalty * self.get_l2_loss()
+    # self.discriminator_objective += tf.reduce_sum(tf.square(l))
+    # self.discriminator_objective += tf.reduce_sum( tf.square(l_star - 1) )
+
+    # self.discriminator_objective += 10*tf.reduce_sum( -tf.log(l_star+1e-20) )
+    self.discriminator_objective = -0.1*tf.reduce_sum(tf.square(l)) + 0.1*tf.reduce_sum(tf.square(l_star))
     self.yp = self.yp_ar[-1] #self.get_prediction_net(input=self.h_state)
-    #l = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=self.yt_ind, logits=current_yp_ind))
-    self.objective += self.config.l2_penalty * self.get_l2_loss()
-
-
     #self.yp_ind = tf.reshape(self.yp, [-1, self.config.output_num * self.config.dimension], name="reshaped")
     #self.objective = -tf.reduce_sum(self.yt_ind * tf.log( tf.maximum(self.yp_ind, 1e-20)))
-    self.train_step = self.optimizer.minimize(self.objective)
+    self.train_generator = self.optimizer.minimize(self.generator_objective, var_list=self.spen_variables())
+    self.train_discriminator = self.optimizer.minimize(self.discriminator_objective, var_list=self.loss_variables())
 
 
   def direct_loss_training(self):
@@ -238,7 +275,7 @@ class SPEN:
     self.yt_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYT")
     self.yp_ind= tf.placeholder(tf.float32, shape=[None, self.config.output_num * self.config.dimension], name="OutputYP")
 
-    y_start = self.yp_ind
+    y_start = tf.reshape(self.yp_ind, shape=[-1, self.config.output_num , self.config.dimension])
     #y_start, features = self.get_initialization_net(self.x, self.config.output_num * self.config.dimension, embedding=self.embedding)
 
     current_yp_ind = y_start
@@ -254,6 +291,7 @@ class SPEN:
     else:
       yp_ind = tf.nn.softmax(current_yp_ind)
 
+    yp_ind = tf.reshape(yp_ind, shape=[-1, self.config.output_num * self.config.dimension])
 
     for i in range(int(self.config.inf_iter)):
       self.energy_y = self.get_energy(xinput=self.x, yinput=yp_ind, embedding=self.embedding, reuse=True if i > 0 else False)# - penalty_current
@@ -269,6 +307,7 @@ class SPEN:
           labels=tf.reshape(self.yt_ind, (-1, self.config.output_num, self.config.dimension))))
         l = tf.stop_gradient(l)
         yp_ind = tf.nn.softmax(current_yp_ind)
+        yp_ind = tf.reshape(yp_ind, shape=[-1, self.config.output_num * self.config.dimension])
       else:
         yp_current =  tf.nn.sigmoid(current_yp_ind)
         yp_ind = tf.reshape(yp_current, [-1, self.config.output_num * self.config.dimension])
@@ -287,13 +326,15 @@ class SPEN:
 
     energy_yt = self.get_energy(xinput=self.x, yinput=self.yt_ind, embedding=self.embedding, reuse=True)
     energy_yp = self.get_energy(xinput=self.x, yinput=yp_ind, embedding=self.embedding, reuse=True)
-    ediff =  tf.nn.relu( energy_yp - energy_yt + l) 
-    self.objective = tf.reduce_sum(ediff*ediff)
+    ediff =  tf.nn.relu( energy_yp - energy_yt + l)
+    self.objective = tf.reduce_sum(ediff)
     #self.objective += self.config.l2_penalty * self.get_l2_loss()
 
 
 
     self.train_step = self.optimizer.minimize(self.objective)
+
+
 
 
 
@@ -430,34 +471,7 @@ class SPEN:
     return self
 
 
-  def construct_embedding(self, embedding_size, vocabulary_size):
-    self.vocabulary_size = vocabulary_size
-    self.embedding_size = embedding_size
-    self.embedding_placeholder = tf.placeholder(tf.float32, [self.vocabulary_size, self.embedding_size])
 
-    with tf.variable_scope(self.config.spen_variable_scope) as scope:
-      self.embedding = tf.get_variable("emb", shape=[self.vocabulary_size, self.embedding_size], dtype=tf.float32,
-                                       initializer=tfi.zeros(), trainable=True)
-    self.embedding_init = self.embedding.assign(self.embedding_placeholder)
-
-    return self
-
-  def createOptimizer(self):
-    self.optimizer = tf.train.AdamOptimizer(self.learning_rate_ph)
-
-  def construct(self, training_type = TrainingType.SSVM ):
-    if training_type == TrainingType.SSVM:
-      return self.ssvm_training()
-    elif training_type == TrainingType.Rank_Based:
-      return self.rank_based_training()
-    elif training_type == TrainingType.End2End:
-      return self.end2end_training()
-    elif training_type == TrainingType.Value_Matching:
-      return self.value_training()
-    elif training_type == TrainingType.NDLM:
-      return self.direct_loss_training()
-    else:
-      raise NotImplementedError
 
   def gather_numpy(self, y, dim, index):
       """
@@ -476,7 +490,7 @@ class SPEN:
       self_xsection_shape = y.shape[:dim] + y.shape[dim + 1:]
       if idx_xsection_shape != self_xsection_shape:
           raise ValueError("Except for dimension " + str(dim) +
-                           ", all dimensions of index and self should be the same size")
+                           ", ll dimensions of index and self should be the same size")
       if index.dtype != np.dtype('int_'):
           raise TypeError("The values of index must be integers")
       data_swaped = np.swapaxes(y, 0, dim)
@@ -829,7 +843,10 @@ class SPEN:
       feeddic = {self.x: xinput,
                  self.yp_ind: yp_ind_init,
                  self.inf_penalty_weight_ph: self.config.inf_penalty,
-                 self.dropout_ph: self.config.dropout}
+                 self.dropout_ph: self.config.dropout,
+                 self.noise_rate_ph : 0.0,
+                 self.batch_size_ph : xinput.shape[0]
+                 }
       yp = self.sess.run(self.yp, feed_dict=feeddic)
     else:
       self.inf_objective = self.energy_yp
@@ -964,7 +981,7 @@ class SPEN:
     _, o, ind_ar, en_ar, g_ar, l_ar = self.sess.run([self.train_step, self.objective,self.ind_ar, self.en_ar, self.g_ar, self.l_ar ], feed_dict=feeddic)
 
     if verbose > 0:
-      print("----------------------------------------------------------")
+      print("-----------------  {} -----------------------------------------".format(self.train_iter))
       for i in range(int(self.config.inf_iter)):
         print (g_ar[i],  ind_ar[i], np.average(en_ar[i]), l_ar[i])
 
@@ -1001,3 +1018,45 @@ class SPEN:
         print (g_ar[i],  ind_ar[i], np.average(en_ar[i]), l_ar[i], np.average(v_ar[i]), ld_ar[i])
 
     return o
+
+
+  def train_supervised_adv_batch(self, xbatch, ybatch, verbose=0):
+    tflearn.is_training(True, self.sess)
+    if self.config.dimension > 1:
+      yt_ind = self.var_to_indicator(ybatch)
+      yt_ind = np.reshape(yt_ind, (-1, self.config.output_num * self.config.dimension))
+    else:
+      yt_ind = ybatch
+    bsize = xbatch.shape[0]/2
+
+    yp_init = np.random.normal(0, 1, size=(bsize, self.config.dimension * self.config.output_num))
+    feeddic_d = {self.x: xbatch[:bsize], self.yt_ind: yt_ind[:bsize],
+               self.yp_ind: yp_init,
+               self.learning_rate_ph: self.config.learning_rate,
+               self.inf_penalty_weight_ph: self.config.inf_penalty,
+               self.noise_rate_ph : self.config.noise_rate,
+               self.batch_size_ph: yt_ind.shape[0],
+               self.dropout_ph: self.config.dropout}
+
+
+
+    _, do  = self.sess.run(
+      [self.train_discriminator, self.discriminator_objective], feed_dict=feeddic_d)
+
+    yp_init = np.random.normal(0, 1, size=(bsize, self.config.dimension * self.config.output_num))
+    feeddic_g = {self.x: xbatch[bsize:], self.yt_ind: yt_ind[bsize:],
+               self.yp_ind: yp_init,
+               self.learning_rate_ph: self.config.learning_rate,
+               self.inf_penalty_weight_ph: self.config.inf_penalty,
+               self.noise_rate_ph : self.config.noise_rate,
+               self.batch_size_ph: yt_ind.shape[0],
+               self.dropout_ph: self.config.dropout}
+
+
+    _, go = self.sess.run(
+      [self.train_generator, self.generator_objective],
+      feed_dict=feeddic_g)
+
+    print (self.train_iter, do, go)
+    return 0
+
