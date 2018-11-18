@@ -1,7 +1,9 @@
 
 
 class Config:
+
   def __init__(self):
+
     self.dropout = 0.0
     self.layer_info = None
     self.en_layer_info = None
@@ -36,3 +38,7 @@ class Config:
     self.inf_clip_min = -1.0
     self.inf_clip_max = 1.0
 
+    # required for e=spen
+    self.samples = 3
+    self.sample_top_k = True
+    self.use_pairs = True

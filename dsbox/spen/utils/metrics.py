@@ -2,6 +2,7 @@
 import numpy as np
 from sklearn.metrics import normalized_mutual_info_score
 
+
 def token_level_loss(cpred, ctrue):
   try:
     label_num = np.shape(cpred)[1]

@@ -9,9 +9,6 @@ import sys
 import random
 
 
-SAMPLE_TOP_K = True
-SAMPLES_PER_DATA_POINT = 5
-
 class InfInit(Enum):
     Random_Initialization = 1
     GT_Initialization = 2
@@ -37,10 +34,6 @@ class SPEN:
         self.is_training = tf.placeholder(tf.float32, shape=[], name="IsTraining")
         self.dropout_ph = tf.placeholder(tf.float32, shape=[], name="Dropout")
         self.embedding = None
-
-        # TODO: shift these to configurations
-        self.samples = SAMPLES_PER_DATA_POINT
-        self.is_sample_top_k = SAMPLE_TOP_K
 
     def init(self):
         init_op = tf.global_variables_initializer()
@@ -267,6 +260,7 @@ class SPEN:
         self.ce = - tf.reduce_sum(self.yp_h * tf.log(tf.maximum(self.yp_l, 1e-20)), 1)   # [[batch_size x num_labels] x softmax(label_dimension)] -- cross entropy computation on the third dimension
 
         self.diff = (self.value_h - tf.reduce_mean(self.value_l, 1)) * self.margin_weight_ph       # difference between values
+        #self.diff = (self.value_h - self.value_l[:, 0] ) * self.margin_weight_ph       # difference between values
 
         # self.objective = tf.reduce_sum(tf.maximum(-self.energy_yh + self.energy_yl + self.diff, 0.0)) \
         #                  + self.config.l2_penalty * self.get_l2_loss()  # L2 regularization with margin loss
@@ -307,13 +301,18 @@ class SPEN:
         return self
 
     def construct(self, training_type=TrainingType.SSVM):
+
+        self.training_type = training_type
         # tf.reset_default_graph()
         if training_type == TrainingType.SSVM:
             return self.ssvm_training()
         elif training_type == TrainingType.Rank_Based:
             return self.rank_based_training()
         elif training_type == TrainingType.Rank_Based_Expected:
-            return self.rank_based_training_expected()
+            if not self.config.use_pairs:
+                return self.rank_based_training_expected()
+            else:
+                return self.rank_based_training()
         elif training_type == TrainingType.End2End:
             return self.end2end_training()
         elif training_type == TrainingType.Value_Matching:
@@ -789,18 +788,19 @@ class SPEN:
                 top_k_elements[top_k_element_index, -1] = dimension_index
 
                 top_k_elements_score[top_k_element_index] \
-                    = sum_log_values[sample_index] + temp_samples_sum_log_score[element_index]
+                    = temp_samples_sum_log_score[element_index]
 
             return top_k_elements, top_k_elements_score
 
-    def get_more_samples_from_yp(self, prob_dist, num_samples=SAMPLES_PER_DATA_POINT):
+    def get_more_samples_from_yp(self, prob_dist):
         """
         :param prob_dist: current prediction matrix [output_num x dimension]
         :param num_samples: number of samples from this distribution
         :return:
         """
 
-        if self.is_sample_top_k:
+        num_samples = self.config.num_samples
+        if self.config.sample_top_k:
 
             n_len = 0
             while self.config.dimension ** n_len < num_samples:
@@ -820,13 +820,13 @@ class SPEN:
                     = self.find_k_best(prob_dist, sum_log_values, label_order[index_val],
                                        yp_samples=tp_samples)
 
-            # 1 hot representation
-            final_yp_samples = np.zeros((num_samples, self.config.output_num, self.config.dimension))
 
+            final_yp_samples = np.zeros((num_samples, self.config.output_num, self.config.dimension))   # 1 hot representation
             for sample_index in range(num_samples):
                 for label_index in range(self.config.output_num):
                     final_yp_samples[sample_index, label_index, int(yp_samples[sample_index, label_index])] = 1
             return final_yp_samples
+
         else:
             cum_prob_dist = np.cumsum(prob_dist, axis=1)
             samples = np.random.uniform(0, 1, num_samples * self.config.output_num).reshape(num_samples,
@@ -838,6 +838,97 @@ class SPEN:
             yp_samples[np.arange(samples.shape[0]), np.argmax(samples, axis=1)] = 1
 
             return yp_samples.reshape(num_samples, self.config.output_num, self.config.dimension)
+
+    def get_expected_prediction_samples_espen(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True):
+
+        self.inf_objective = self.energy_yp
+        self.inf_gradient = self.energy_ygradient
+
+        y_a = self.inference(xinput=xinput, yinit=yinit, train=True, ascent=ascent, inf_iter=inf_iter)
+        y_ans = y_a[-1]
+        y_ans = np.reshape(y_ans, (-1, self.config.output_num, self.config.dimension))
+        y_ans = np.argmax(y_ans, -1)
+
+        y_ans = self.var_to_indicator(y_ans)
+        y_ans = np.reshape(y_ans, (-1, self.config.output_num*self.config.dimension))
+
+        yp = self.sess.run(self.yp_h, feed_dict={self.yp_h_ind: y_ans})
+        yp = np.reshape(yp, (-1, self.config.output_num, self.config.dimension))
+
+        # if self.config.use_search:  # this step is not used for supervised training
+        #     raise NotImplementedError
+        # else:
+        #     y_better = yinput
+        #     found = np.ones(yp.shape[0])
+
+        y_better = yinput
+        found = np.ones(yp.shape[0])
+        yb = self.var_to_indicator(y_better)
+
+        # y_a = np.array([yp, y_better])
+        fh, fl, yh, yl, x = [], [], [], [], []
+
+        # TODO: Can we get rid of this loop? It should be possible as long as we can run self.evaluate in batch
+        # What is the use of found? Is it relevant for my task.
+        # Its running over batch samples
+        for i in range(yp.shape[0]):
+
+            if found[i] > 0:
+                if yinput is not None:
+
+                    # Adding the current prediction and ground truth pair
+                    fp = self.evaluate(yinput=np.expand_dims(np.argmax(yp[i], 1), 0), yt=np.expand_dims(yinput[i], 0))
+
+                    fb = self.evaluate(yinput=np.expand_dims(y_better[i], 0), yt=np.expand_dims(yinput[i], 0))
+
+                    fh.append(fb[0])
+                    fl.append(fp[0])
+                    yh.append(yb[i])
+
+                    yl.append(y_ans[i])
+                    x.append(xinput[i])
+
+                    # Adding more negative samples
+                    more_samples_from_yp = self.get_more_samples_from_yp(yp[i])
+                    for sample_index in range(self.config.num_samples):
+
+                        # Adding sample information from prediction distribution
+                        fp = self.evaluate(
+                            yinput=np.expand_dims(np.argmax(more_samples_from_yp[sample_index], 1), 0),
+                            yt=np.expand_dims(yinput[i], 0))
+
+                        yl.append(more_samples_from_yp[sample_index].flatten())
+                        fl.append(fp[0])
+
+                        # Adding corresponding ground truth and input
+                        if self.config.use_pairs:
+                            fh.append(fb[0])
+                            yh.append(yb[i])
+                            x.append(xinput[i])
+                else:
+                    raise NotImplementedError
+
+        # input variable
+        x = np.array(x)  # [batch_size, num_features]
+
+        # Evaluation score for correct structure
+        fh = np.array(fh)  # [batch_size]
+
+        # Evaluation score for incorrect structure
+        fl = np.array(fl).reshape(-1, self.config.num_samples + 1)   # [batch_size, self.samples+1]
+
+        # Output configuration for correct structure
+        yh = np.array(yh)  # [batch_size, num_labels, label_dimension]
+
+        # Output configuration for incorrect structure # [batch_size, num_labels x label_dimension, self.samples+1]
+        if not self.config.use_pairs:
+            yl = np.array(yl).reshape(-1, self.config.num_samples+1, yh.shape[1]*yh.shape[2]).swapaxes(1,2)
+        else:
+            fl = fl.reshape([-1])
+            yl = np.array(yl)
+
+        return x, yh, yl, fh, fl
+
 
     def get_expected_prediction_samples(self, xinput=None, yinput=None, yinit=None, inf_iter=None, ascent=True):
 
@@ -886,38 +977,32 @@ class SPEN:
                     x.append(xinput[i])
 
                     # Adding more negative samples
-                    more_samples_from_yp = self.get_more_samples_from_yp(yp[i], num_samples=self.samples)
-                    for sample_index in range(self.samples):
+                    more_samples_from_yp = self.get_more_samples_from_yp(yp[i])
+                    for sample_index in range(self.config.num_samples):
 
-                        # Adding sample information from prediction distribution
-                        fp = self.evaluate(xinput=xinput[i], yinput=np.expand_dims(np.argmax(more_samples_from_yp[sample_index], 1), 0), yt=np.expand_dims(yinput[i], 0))
+                        # Adding sample
+                        fp = self.evaluate(xinput=xinput[i],
+                                           yinput=np.expand_dims(np.argmax(more_samples_from_yp[sample_index], 1),
+                                                                 0), yt=np.expand_dims(yinput[i], 0))
                         yl.append(more_samples_from_yp[sample_index].flatten())
-                        fl.append(fp[0])
 
                         # Adding corresponding ground truth and input
-                        #fh.append(fb[0])
-                        #yh.append(yb[i])
-                        #x.append(xinput[i])
+                        fh.append(fb[0])
+                        fl.append(fp[0])
+                        yh.append(yb[i])
+                        x.append(xinput[i])
+
+
                 else:
                     raise NotImplementedError
 
-        # input variable
-        x = np.array(x)  # [batch_size, num_features]
-
-        # Evaluation score for correct structure
-        fh = np.array(fh)  # [batch_size]
-
-        # Evaluation score for incorrect structure
-        fl = np.array(fl).reshape(-1, self.samples + 1)   # [batch_size, self.samples+1]
-
-        # Output configuration for correct structure
-        yh = np.array(yh)  # [batch_size, num_labels, label_dimension]
-
-        # Output configuration for incorrect structure # [batch_size, num_labels x label_dimension, self.samples+1]
-        yl = np.array(yl).reshape(-1, self.samples+1, yh.shape[1]*yh.shape[2]).swapaxes(1,2)
+        x = np.array(x)
+        fh = np.array(fh)  # Evaluation score for correct structure
+        fl = np.array(fl)  # Evaluation score for incorrect structure
+        yh = np.array(yh)  # Output configuration for correct structure
+        yl = np.array(yl)  # Output configuration for incorrect structure
 
         return x, yh, yl, fh, fl
-
 
     def train_expected_supervised_batch(self, xbatch=None, ybatch=None, yinit=None, verbose=0):
         tflearn.is_training(True, self.sess)
@@ -930,10 +1015,39 @@ class SPEN:
         while it < 1:
             it += 1
 
-            x_b, y_h, y_l, l_h, l_l = self.get_expected_prediction_samples(xinput=xbatch, yinput=ybatch, yinit=yinit,
-                                                               ascent=True)
 
-            dist = np.linalg.norm(np.reshape(y_h, y_l[:, :, 0].shape) - y_l[:, :, 0]) #TODO: change this with newly modified negative samples
+            # if self.training_type == TrainingType.Rank_Based_Expected:
+            #     x_b, y_h, y_l, l_h, l_l = self.get_expected_prediction_samples(xinput=xbatch, yinput=ybatch,
+            #                                                                    yinit=yinit,
+            #                                                                    ascent=True)
+            # else:
+            #     x_b, y_h, y_l, l_h, l_l = self.get_expected_prediction_samples_old(xinput=xbatch, yinput=ybatch, yinit=yinit,
+            #                                                        ascent=True)
+
+            if self.training_type == TrainingType.Rank_Based_Expected:
+                x_b, y_h, y_l, l_h, l_l \
+                    = self.get_expected_prediction_samples_espen(xinput=xbatch, yinput=ybatch, yinit=yinit, ascent=True)
+
+            else:
+
+                x_b, y_h, y_l, l_h, l_l \
+                    = self.get_expected_prediction_samples(xinput=xbatch, yinput=ybatch, yinit=yinit, ascent=True)
+            #
+
+            # if self.training_type == TrainingType.Rank_Based_Expected:
+            #     dist = np.linalg.norm(np.reshape(y_h, y_l[:, :, 0].shape) - y_l[:, :, 0])
+            # else:
+            #     dist = np.linalg.norm(np.reshape(y_h, y_l.shape) - y_l)
+
+            if self.training_type == TrainingType.Rank_Based_Expected:
+
+                if self.config.use_pairs:
+                    dist = np.linalg.norm(np.reshape(y_h, y_l.shape)[::self.config.num_samples+1]
+                                          - y_l[::self.config.num_samples+1])
+                else:
+                    dist = np.linalg.norm(np.reshape(y_h, y_l[:, :, 0].shape) - y_l[:, :, 0])
+            else:
+                dist = np.linalg.norm(np.reshape(y_h, y_l.shape) - y_l)
 
             total = np.size(l_h)
             indices = np.arange(0, total)
