@@ -799,7 +799,7 @@ class SPEN:
         :return:
         """
 
-        num_samples = self.config.num_samples
+        num_samples = self.config.samples
         if self.config.sample_top_k:
 
             n_len = 0
@@ -890,7 +890,7 @@ class SPEN:
 
                     # Adding more negative samples
                     more_samples_from_yp = self.get_more_samples_from_yp(yp[i])
-                    for sample_index in range(self.config.num_samples):
+                    for sample_index in range(self.config.samples):
 
                         # Adding sample information from prediction distribution
                         fp = self.evaluate(
@@ -915,14 +915,14 @@ class SPEN:
         fh = np.array(fh)  # [batch_size]
 
         # Evaluation score for incorrect structure
-        fl = np.array(fl).reshape(-1, self.config.num_samples + 1)   # [batch_size, self.samples+1]
+        fl = np.array(fl).reshape(-1, self.config.samples + 1)   # [batch_size, self.samples+1]
 
         # Output configuration for correct structure
         yh = np.array(yh)  # [batch_size, num_labels, label_dimension]
 
         # Output configuration for incorrect structure # [batch_size, num_labels x label_dimension, self.samples+1]
         if not self.config.use_pairs:
-            yl = np.array(yl).reshape(-1, self.config.num_samples+1, yh.shape[1]*yh.shape[2]).swapaxes(1,2)
+            yl = np.array(yl).reshape(-1, self.config.samples+1, yh.shape[1]*yh.shape[2]).swapaxes(1,2)
         else:
             fl = fl.reshape([-1])
             yl = np.array(yl)
@@ -978,7 +978,7 @@ class SPEN:
 
                     # Adding more negative samples
                     more_samples_from_yp = self.get_more_samples_from_yp(yp[i])
-                    for sample_index in range(self.config.num_samples):
+                    for sample_index in range(self.config.samples):
 
                         # Adding sample
                         fp = self.evaluate(xinput=xinput[i],
@@ -1042,8 +1042,8 @@ class SPEN:
             if self.training_type == TrainingType.Rank_Based_Expected:
 
                 if self.config.use_pairs:
-                    dist = np.linalg.norm(np.reshape(y_h, y_l.shape)[::self.config.num_samples+1]
-                                          - y_l[::self.config.num_samples+1])
+                    dist = np.linalg.norm(np.reshape(y_h, y_l.shape)[::self.config.samples+1]
+                                          - y_l[::self.config.samples+1])
                 else:
                     dist = np.linalg.norm(np.reshape(y_h, y_l[:, :, 0].shape) - y_l[:, :, 0])
             else:
