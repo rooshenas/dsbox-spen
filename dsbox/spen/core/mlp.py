@@ -58,7 +58,7 @@ class MLP:
         net = xinput
         j = 0
         for (sz, a) in self.config.layer_info:
-            print(sz, a)
+            print((sz, a))
             net = tflearn.fully_connected(net, sz,
                                           weight_decay=self.config.weight_decay,
                                           # weights_init=tfi.variance_scaling(,
@@ -82,7 +82,7 @@ class MLP:
 
     def softmax_prediction_network2(self, xinput=None, reuse=False):
         net = xinput
-        print("xinput", xinput)
+        print(("xinput", xinput))
         with tf.variable_scope("pred") as scope:
             net = tflearn.fully_connected(net, 1000, regularizer='L2',
                                           weight_decay=self.config.weight_decay,
@@ -108,7 +108,7 @@ class MLP:
         j = 0
         with tf.variable_scope("pred") as scope:
             for (sz, a) in self.config.pred_layer_info:
-                print(sz, a)
+                print((sz, a))
                 net = tflearn.fully_connected(net, sz, regularizer='L2', activation=a,
                                               weight_decay=self.config.weight_decay,
                                               weights_init=tfi.variance_scaling(),
@@ -152,7 +152,7 @@ class MLP:
         net = tf.concat((hnet, xnet), axis=1)
         with tf.variable_scope("pred") as scope:
             for (sz, a) in self.config.pred_layer_info:
-                print(sz, a)
+                print((sz, a))
                 net = tflearn.fully_connected(net, sz, regularizer='L2',
                                               weight_decay=self.config.weight_decay,
                                               weights_init=tfi.variance_scaling(),
@@ -375,7 +375,7 @@ class MLP:
         _, o = self.sess.run([self.train_step, self.objective], feed_dict=feeddic)
 
         if verbose > 0:
-            print(self.train_iter, o)
+            print((self.train_iter, o))
         return o
 
     def var_to_indicator(self, vd):

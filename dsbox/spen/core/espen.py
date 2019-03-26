@@ -356,8 +356,8 @@ class SPEN:
             if self.config.loglevel > 5:
 
                 ypn = self.softmax(yp_ind, axis=-1)
-                print("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
-                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(ypn, 2)))
+                print(("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
+                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(ypn, 2))))
 
             yp_a.append(np.reshape(yp, (-1, self.config.output_num * self.config.dimension)))
             it += 1
@@ -412,7 +412,7 @@ class SPEN:
                                           np.expand_dims(random_proposal_new, 0), yt=y)
 
                     if self.config.loglevel > 60:
-                        print(iter, l, distance, score, score_first)
+                        print((iter, l, distance, score, score_first))
 
                     if score > best_score:
                         best_score = score
@@ -441,8 +441,8 @@ class SPEN:
                 found = True
             found_point[iter] = 1 if found else 0
             if self.config.loglevel > 40:
-                print("iter:", iter, "found:", found, "score first: ", score_first[0], "new score", best_score[0],
-                      "dist", best_distance, "checked: ", l)
+                print(("iter:", iter, "found:", found, "score first: ", score_first[0], "new score", best_score[0],
+                      "dist", best_distance, "checked: ", l))
 
             final_best[iter, :] = np.copy(random_proposal_new)
             # if found:
@@ -515,7 +515,7 @@ class SPEN:
                     fb = self.evaluate(xinput=np.expand_dims(xinput[i], 0), yinput=np.expand_dims(y_better[i], 0))
 
                 if self.config.loglevel > 30:
-                    print(i, fp[0], fb[0], en_p[i], en_better[i])
+                    print((i, fp[0], fb[0], en_p[i], en_better[i]))
 
                 fh.append(fb[0])
                 fl.append(fp[0])
@@ -587,7 +587,7 @@ class SPEN:
             indices = np.arange(0, total)
             # for b in range(total/bs + 1 ):
             if l_l.shape[0] <= 0:
-                print "skip"
+                print("skip")
                 return
 
             #  perm = np.random.permutation(range(total))
@@ -608,7 +608,7 @@ class SPEN:
             if verbose > 0:
 
                 # print("************************************************************************************************")
-                print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0], np.average(l_l))
+                print((self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0], np.average(l_l)))
         return
 
     def get_more_samples_from_yp(self, prob_dist):
@@ -735,8 +735,8 @@ class SPEN:
 
             if verbose > 0:
                 # print("************************************************************************************************")
-                print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0],
-                      np.average(l_l))
+                print((self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0],
+                      np.average(l_l)))
         return
 
     def save(self, path):

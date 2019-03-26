@@ -650,12 +650,12 @@ class SPEN:
       self.g_ar.append(g)
       self.en_ar.append(en)
       if self.config.loglevel > 10:
-        print (g[0,0:50])
+        print((g[0,0:50]))
 
 
       if self.config.loglevel > 5:
-          print("energy:", np.average(en), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
-                "gnorm:", np.average(gnorm), "yp:", np.average(np.max(yp, 2)))
+          print(("energy:", np.average(en), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
+                "gnorm:", np.average(gnorm), "yp:", np.average(np.max(yp, 2))))
 
       i += 1
 
@@ -687,7 +687,7 @@ class SPEN:
             #changed = True
             #break
       if self.config.loglevel > 4:
-        print ("iter:", iter, "found:", found, "score first: ", start, "new score", score_first)
+        print(("iter:", iter, "found:", found, "score first: ", start, "new score", score_first))
       final_best[iter, :] = yprev[iter, :]
       if found:
         final_best[iter, best_l] = best_label
@@ -730,10 +730,10 @@ class SPEN:
     # print (np.average(f_a, axis=1))
     if self.config.loglevel > 4:
       for t in range(xinput.shape[0]):
-        print (t, f_a[-2][t], f_a[-1][t], np.argmax(yp,2)[t][:10])
+        print((t, f_a[-2][t], f_a[-1][t], np.argmax(yp,2)[t][:10]))
 
     size = np.shape(xinput)[0]
-    t = np.array(range(size))
+    t = np.array(list(range(size)))
     f1 = []
     f2 = []
     y1 = []
@@ -789,13 +789,13 @@ class SPEN:
     yp = y_a[-1]
     if self.config.loglevel > 4:
       for t in range(xinput.shape[0]):
-        print(t, f_a[-2][t], f_a[-1][t], np.argmax(yp, 2)[t][:10])
+        print((t, f_a[-2][t], f_a[-1][t], np.argmax(yp, 2)[t][:10]))
 
     #print (np.average(en_a, axis=1))
     #print (np.average(f_a, axis=1))
 
     size = np.shape(xinput)[0]
-    t = np.array(range(size))
+    t = np.array(list(range(size)))
     f1 = []
     f2 = []
     y1 = []
@@ -860,7 +860,7 @@ class SPEN:
       if self.config.loglevel > 10:
         for i in range(int(inf_iter)):
           ym = np.argmax(y_a[i], -1)
-          print (ym[0,0:20,])
+          print((ym[0,0:20,]))
 
       if self.config.dimension == 1:
         yp = np.reshape(yp, [-1, self.config.output_num])
@@ -895,10 +895,10 @@ class SPEN:
     self.inf_gradient = self.loss_augmented_energy_ygradient
     y_a = self.inference(xinput=xinput, yinput=yinput, inf_iter=inf_iter, train=train, ascent=ascent, loss_aug=loss_aug)
     if self.config.loglevel > 2:
-      print (np.shape(self.g_ar), np.shape(y_a))
+      print((np.shape(self.g_ar), np.shape(y_a)))
       for i in range(inf_iter):
         y = np.reshape(y_a[i], (-1, self.config.output_num*self.config.dimension))
-        print (np.average(np.linalg.norm(self.g_ar[i],1)), np.average(np.linalg.norm(y,1)))
+        print((np.average(np.linalg.norm(self.g_ar[i],1)), np.average(np.linalg.norm(y,1))))
 
     return y_a[-1]
 
@@ -928,7 +928,7 @@ class SPEN:
                          self.dropout_ph: self.config.dropout,
                          self.margin_weight_ph: self.config.margin_weight})
       if verbose>0:
-        print (self.train_iter, o1, n1, v1,v2, e1,e2, np.shape(xbatch)[0], np.shape(x_b)[0])
+        print((self.train_iter, o1, n1, v1,v2, e1,e2, np.shape(xbatch)[0], np.shape(x_b)[0]))
     else:
       if verbose>0:
         print ("skip")
@@ -951,7 +951,7 @@ class SPEN:
 
     yp_ind = np.reshape(yp_ind, (-1, self.config.output_num*self.config.dimension))
     if verbose > 1:
-      print (yp_ind[0])
+      print((yp_ind[0]))
 
     feeddic = {self.x:xbatch, self.yp: yp_ind, self.yt: yt_ind,
                self.learning_rate_ph:self.config.learning_rate,
@@ -960,7 +960,7 @@ class SPEN:
 
     _, o,ce, n, en_yt, en_yhat = self.sess.run([self.train_step, self.objective, self.ce, self.num_update, self.total_energy_yt, self.total_energy_yp], feed_dict=feeddic)
     if verbose > 0:
-      print (self.train_iter ,o,n, en_yt, en_yhat, np.average(ce))
+      print((self.train_iter ,o,n, en_yt, en_yhat, np.average(ce)))
     return o
 
   def train_supervised_e2e_batch(self, xbatch, ybatch, verbose=0):
@@ -981,9 +981,9 @@ class SPEN:
     _, o, ind_ar, en_ar, g_ar, l_ar = self.sess.run([self.train_step, self.objective,self.ind_ar, self.en_ar, self.g_ar, self.l_ar ], feed_dict=feeddic)
 
     if verbose > 0:
-      print("-----------------  {} -----------------------------------------".format(self.train_iter))
+      print(("-----------------  {} -----------------------------------------".format(self.train_iter)))
       for i in range(int(self.config.inf_iter)):
-        print (g_ar[i],  ind_ar[i], np.average(en_ar[i]), l_ar[i])
+        print((g_ar[i],  ind_ar[i], np.average(en_ar[i]), l_ar[i]))
 
     return o
 
@@ -1013,9 +1013,9 @@ class SPEN:
     if verbose > 0:
       print("----------------------------------------------------------")
       if verbose > 1:
-        print (v_ar[-1])
+        print((v_ar[-1]))
       for i in range(int(self.config.inf_iter)):
-        print (g_ar[i],  ind_ar[i], np.average(en_ar[i]), l_ar[i], np.average(v_ar[i]), ld_ar[i])
+        print((g_ar[i],  ind_ar[i], np.average(en_ar[i]), l_ar[i], np.average(v_ar[i]), ld_ar[i]))
 
     return o
 
@@ -1057,6 +1057,6 @@ class SPEN:
       [self.train_generator, self.generator_objective],
       feed_dict=feeddic_g)
 
-    print (self.train_iter, do, go)
+    print((self.train_iter, do, go))
     return 0
 

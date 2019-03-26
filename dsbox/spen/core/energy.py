@@ -24,7 +24,7 @@ class EnergyModel:
             # output = tf.nn.dropout(output, 1- self.config.dropout)
 
         #nsteps = tf.shape(output)[1]
-        print output.get_shape().as_list()
+        print(output.get_shape().as_list())
 
         with tf.variable_scope("proj") as scope:
             # if reuse:
@@ -761,15 +761,15 @@ class EnergyModel:
         return logits, net
 
     def get_energy_cnn(self, xinput=None, yinput=None, embedding=None, reuse=False):
-        print("tet", xinput.get_shape().as_list())
-        print("ytet", yinput.get_shape().as_list())
+        print(("tet", xinput.get_shape().as_list()))
+        print(("ytet", yinput.get_shape().as_list()))
         # input = tf.concat((xinput, yinput), axis=1)
         input = xinput
-        print("as", input.get_shape().as_list())
+        print(("as", input.get_shape().as_list()))
         # image_size = tf.cast(tf.sqrt(tf.cast(tf.shape(input)[1], tf.float64)), tf.int32)
         output_size = yinput.get_shape().as_list()[-1]
         batch_size = xinput.get_shape().as_list()[0]
-        print("batch size", batch_size)
+        print(("batch size", batch_size))
         net = input
         j = 0
         with tf.variable_scope(self.config.spen_variable_scope):
@@ -864,14 +864,14 @@ class EnergyModel:
     def get_energy_horses(self, xinput=None, yinput=None, embedding=None, reuse=False):
         j = 0
         net = xinput
-        print ("yinput:", yinput.get_shape().as_list())
+        print(("yinput:", yinput.get_shape().as_list()))
         with tf.variable_scope("spen/fx"):
             net = tf.reshape(net, shape=(-1, self.config.image_width, self.config.image_height, 3))
             mask = tf.reshape(yinput, shape=(-1, self.config.image_width, self.config.image_width, 2))
             #mask = tf.expand_dims(mask[:, :, :, 1],-1)
-            print ("mask:", mask.get_shape().as_list())
+            print(("mask:", mask.get_shape().as_list()))
             net = tf.concat((net, mask), axis=3)
-            print(net.get_shape().as_list())
+            print((net.get_shape().as_list()))
 
             net = tf.layers.conv2d(inputs=net, filters=64,
                                    kernel_size=[5, 5], strides=1, padding="same", name="conv00",
@@ -948,14 +948,14 @@ class EnergyModel:
     def get_energy_horses_high(self, xinput=None, yinput=None, embedding=None, reuse=False):
         j = 0
         net = xinput
-        print("yinput:", yinput.get_shape().as_list())
+        print(("yinput:", yinput.get_shape().as_list()))
         with tf.variable_scope("spen/fx"):
             net = tf.reshape(net, shape=(-1, self.config.image_width, self.config.image_height, 3))
             mask = tf.reshape(yinput, shape=(-1, self.config.image_width, self.config.image_width, 2))
             mask = tf.expand_dims(mask[:, :, :, 1], -1)
-            print("mask:", mask.get_shape().as_list())
+            print(("mask:", mask.get_shape().as_list()))
             net = tf.concat((net, mask), axis=3)
-            print(net.get_shape().as_list())
+            print((net.get_shape().as_list()))
 
             net = tf.layers.conv2d(inputs=net, filters=64,
                                    kernel_size=[3, 3], strides=1, padding="VALID", name="conv0p",
@@ -1514,14 +1514,14 @@ class EnergyModel:
                 c = tf.expand_dims(logits[:, :self.config.hidden_num], axis=-1)
                 b = tf.expand_dims(logits[:, self.config.hidden_num:], axis=-1)
                 A = tf.matmul(c, c, transpose_b=True)
-                print("A:", A.get_shape().as_list())
+                print(("A:", A.get_shape().as_list()))
 
                 yTA = tf.matmul(h, A, transpose_a=True)
 
-                print("yTA:", yTA.get_shape().as_list())
+                print(("yTA:", yTA.get_shape().as_list()))
 
                 yTAy = tf.matmul(yTA, h)
-                print("yTAy:", yTAy.get_shape().as_list())
+                print(("yTAy:", yTAy.get_shape().as_list()))
 
                 global_e = -yTAy
                 local_e = - tf.matmul(b, h, transpose_a=True)
@@ -1721,12 +1721,12 @@ class EnergyModel:
 
         pooled_outputs = []
 
-        print "xinput", xinput_x.get_shape().as_list()
-        print "yinput", yinput_x.get_shape().as_list()
+        print("xinput", xinput_x.get_shape().as_list())
+        print("yinput", yinput_x.get_shape().as_list())
 
         net = tf.concat((xinput_x, yinput_x), axis=-1)
         net = tf.expand_dims(net, -1)
-        print "input", net.get_shape().as_list()
+        print("input", net.get_shape().as_list())
         with tf.variable_scope("spen/fx"):
             net = tf.layers.conv2d(inputs=net, filters= 200,
                                kernel_size=[3, 64], strides=1, padding="SAME", name="conv00",

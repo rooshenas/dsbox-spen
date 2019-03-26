@@ -20,7 +20,7 @@ class RandomCrop(object):
     new_h, new_w = self.output_size
     top = np.random.randint(0, h - new_h)
     left = np.random.randint(0, w - new_w)
-    return [image[top: top + new_h, left: left + new_w] for image in image_left, image_right]
+    return [image[top: top + new_h, left: left + new_w] for image in (image_left, image_right)]
 
 
 def get_layers(dataset):
@@ -105,9 +105,11 @@ def get_layers(dataset):
 
 
 def load_data(file):
+  import pdb
+  pdb.set_trace()
   data = []
   for l in open(file, 'r'):
-    y=map(lambda x: -1 if x == "*" else float(x), l.strip().split(','))
+    y=[-1 if x == "*" else float(x) for x in l.strip().split(',')]
     data.append(list(y))
   data = np.array(data)
   return data
@@ -156,7 +158,7 @@ def get_olivetti():
 
   rows = []
   for l in open(path):
-    row = np.array(map(lambda x: float(x), l.strip().split()))
+    row = np.array([float(x) for x in l.strip().split()])
     rows.append(row)
   images = np.stack(rows).transpose()
   left = images[:, :2048]
@@ -333,7 +335,7 @@ def get_7scene(crop=None):
       elements.append((noisy, gt))
 
     list.apply(accumulator, axis=1)
-    x, y = zip(*elements)
+    x, y = list(zip(*elements))
     return np.stack(x), np.stack(y)
 
 
@@ -351,7 +353,7 @@ def get_ppi(ratio):
   allxdata = load_data(ffile)
   allydata = load_data(lfile)
   size = np.shape(allxdata)[0]
-  indices =range(size)
+  indices =list(range(size))
   np.random.shuffle(indices)
   val_ratio = ratio
   test_ratio = 0.5
@@ -447,7 +449,7 @@ def get_medical():
   xdataval = load_data(xtrfile)
 
   size = np.shape(xdataval)[0]
-  indices = range(size)
+  indices = list(range(size))
   np.random.shuffle(indices)
   val_num = int(size * 0.3)
   val_indices = indices[0:val_num]
@@ -458,8 +460,8 @@ def get_medical():
   xdata = xdataval[train_indices, :]
   ydata = ydataval[train_indices, :]
 
-  yvars = range(45)
-  evvars = range(45,45+1449)
+  yvars = list(range(45))
+  evvars = list(range(45,45+1449))
   return (xdata, xval, xtest,ydata, yval, ytest, evvars, yvars)
 
 def get_20ng():
@@ -496,7 +498,7 @@ def get_20ng():
   ytest = test[:, yvars]
 
   size = np.shape(xdataval)[0]
-  indices = range(size)
+  indices = list(range(size))
   np.random.shuffle(indices)
   val_num = int(size * 0.3)
   val_indices = indices[0:val_num]
@@ -579,6 +581,8 @@ def get_dependency_data():
 
 
 def get_data_val(dataset, ratio):
+  import pdb
+  pdb.set_trace()
   if dataset == "ppi":
     return get_ppi(ratio)
   xtrfile = "/iesl/canvas/pedram/mlcond/%s.ts.ev" % dataset
@@ -586,11 +590,12 @@ def get_data_val(dataset, ratio):
   ytrfile = "/iesl/canvas/pedram/mlcond/%s.ts.data" % dataset
   ytsfile = "/iesl/canvas/pedram/mlcond/%s.test.data" % dataset
 
+
   ytest = load_data(ytsfile)
   ydataval = load_data(ytrfile)
   xtest = load_data(xtsfile)
   xdataval = load_data(xtrfile)
-  print(np.shape(xdataval))
+  print((np.shape(xdataval)))
 
   size = np.shape(xdataval)[0]
   indices = np.random.permutation(np.arange(size))

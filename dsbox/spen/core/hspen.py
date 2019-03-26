@@ -135,8 +135,8 @@ class SPEN:
   def ce_loss(self, yt, yp):
     eps = 1e-20
 
-    print "yt",yt.get_shape().as_list()
-    print "yp",yp.get_shape().as_list()
+    print("yt",yt.get_shape().as_list())
+    print("yp",yp.get_shape().as_list())
     #ypc = tf.reshape(yp, (-1, self.config.output_num, self.config.dimension))
     #yp = tf.clip_by_value(yp, clip_value_min=eps, clip_value_max=1.0 - eps )
     #ytc = tf.reshape(yt, (-1, self.config.output_num, self.config.dimension))
@@ -367,7 +367,7 @@ class SPEN:
     for i in range(int(self.config.inf_iter)):
       #tf.square(tf.norm(h_current, axis=1) - 1)
       penalty_current = self.inf_penalty_weight_ph* tf.reduce_sum(tf.square(h_current),1)
-      print "hpenalty", penalty_current.get_shape().as_list()
+      print("hpenalty", penalty_current.get_shape().as_list())
 
       energy_current = self.get_energy(xinput=self.x if noinit else features, yinput=h_current, embedding=self.embedding, reuse=True if i > 0 else False, ) - penalty_current
       g = tf.gradients(energy_current, h_current)[0]
@@ -757,7 +757,7 @@ class SPEN:
       i += 1
       if self.config.loglevel > 3:
         #print (np.shape(g), np.shape(e))
-        print (np.average(e))
+        print((np.average(e)))
         #print (np.average(np.linalg.norm(g, axis=1)), np.average(np.linalg.norm(h, axis=1), np.average(e)))
     return np.array(h_a)
 
@@ -781,11 +781,11 @@ class SPEN:
     f_a = np.array([self.evaluate(xinput=xinput, yinput=np.argmax(y_i,2), yt=yt) for y_i in y_a])
 
 
-    print (np.average(en_a, axis=1))
-    print (np.average(f_a, axis=1))
+    print((np.average(en_a, axis=1)))
+    print((np.average(f_a, axis=1)))
 
     size = np.shape(xinput)[0]
-    t = np.array(range(size))
+    t = np.array(list(range(size)))
     f1 = []
     f2 = []
     y1 = []
@@ -845,11 +845,11 @@ class SPEN:
                                               -1, self.config.output_num * self.config.dimension)),
                                               self.inf_penalty_weight_ph: self.config.inf_penalty,
                                               self.dropout_ph: self.config.dropout})
-    print (np.average(en_a, axis=1))
-    print (np.average(ce_a, axis=1))
+    print((np.average(en_a, axis=1)))
+    print((np.average(ce_a, axis=1)))
 
     size = np.shape(xinput)[0]
-    t = np.array(range(size))
+    t = np.array(list(range(size)))
     y = []
     yp = []
     x = []
@@ -858,7 +858,7 @@ class SPEN:
       for i in t:
 
         violation = (-ce_a[k,i]) * self.config.margin_weight - e_t[i] + en_a[k,i]
-        print (e_t[i], en_a[k,i], ce_a[k,i], violation)
+        print((e_t[i], en_a[k,i], ce_a[k,i], violation))
         if violation > 0:
           yp.append((y_a[k,i,:]))
           x.append(xinput[i,:])
@@ -932,7 +932,7 @@ class SPEN:
       else:
         if self.config.verbose > 3:
           for k in range(self.config.inf_iter):
-            print (np.average(en_ar[k]))
+            print((np.average(en_ar[k])))
         yp_ar = soft_yp_ar
       return yp_ar
     else:
@@ -990,7 +990,7 @@ class SPEN:
                             self.dropout_ph: self.config.dropout}) for ind_i in yp_a])
 
     ce_a = np.array([-np.sum(yinput * np.log(1e-20 + np.reshape(y_p, (-1, self.config.output_num * self.config.dimension))),1) for y_p in yp_a])
-    print ("en:", np.average(en_a, axis=1), "ce:", np.average(ce_a, axis=1))
+    print(("en:", np.average(en_a, axis=1), "ce:", np.average(ce_a, axis=1)))
 
     return self.softmax(yp_a[-1], axis=2, theta=1)
 
@@ -1017,7 +1017,7 @@ class SPEN:
                          self.inf_penalty_weight_ph: self.config.inf_penalty,
                          self.margin_weight_ph: self.config.margin_weight})
       if verbose>0:
-        print (self.train_iter, o1, n1, v1,v2, e1,e2, np.shape(xbatch)[0], np.shape(x_b)[0])
+        print((self.train_iter, o1, n1, v1,v2, e1,e2, np.shape(xbatch)[0], np.shape(x_b)[0]))
     else:
       if verbose>0:
         print ("skip")
@@ -1044,7 +1044,7 @@ class SPEN:
 
     _, o,ce, n, en_yt, en_yhat = self.sess.run([self.train_step, self.objective, self.ce, self.num_update, self.total_energy_yt, self.total_energy_yp], feed_dict=feeddic)
     if verbose > 0:
-      print (self.train_iter ,o,n, en_yt, en_yhat)
+      print((self.train_iter ,o,n, en_yt, en_yhat))
     return n
 
   # def train_supervised_e2e_batch3(self, xbatch, ybatch, verbose=0):
@@ -1103,7 +1103,7 @@ class SPEN:
     _, o, g, h, iter = self.sess.run(
           [self.train_all_step, self.objective, self.g_ar, self.h_ar, self.iter], feed_dict=feeddic)
     if verbose > 0:
-      print (o, g[-1], h[-1], iter)
+      print((o, g[-1], h[-1], iter))
     return o
 
   def train_supervised_e2e_batch(self, xbatch, ybatch, verbose=0):
@@ -1140,10 +1140,10 @@ class SPEN:
         print ("---------------------------------------------------------")
         for k in range(self.config.inf_iter):
           if verbose>1:
-            print (h_ar[k][0])
+            print((h_ar[k][0]))
 
 
-          print (k,g_ar[k], np.average(np.sum(h_ar[k], axis=1)), np.average(en_ar[k]), np.average(l_ar[k]) )
+          print((k,g_ar[k], np.average(np.sum(h_ar[k], axis=1)), np.average(en_ar[k]), np.average(l_ar[k]) ))
     return o
 
 
@@ -1176,9 +1176,9 @@ class SPEN:
       if verbose > 0:
         print ("---------------------------------------------------------")
         for k in range(self.config.inf_iter):
-          print (h_ar[0])
+          print((h_ar[0]))
 
-          print (np.average(np.linalg.norm(g_ar[k], axis=1)), np.mean(h_ar[k]), np.average(en_ar[k]), np.average(l_ar[k]) )
+          print((np.average(np.linalg.norm(g_ar[k], axis=1)), np.mean(h_ar[k]), np.average(en_ar[k]), np.average(l_ar[k]) ))
     return o
 
 
