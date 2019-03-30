@@ -105,8 +105,6 @@ def get_layers(dataset):
 
 
 def load_data(file):
-  import pdb
-  pdb.set_trace()
   data = []
   for l in open(file, 'r'):
     y=[-1 if x == "*" else float(x) for x in l.strip().split(',')]
@@ -581,8 +579,6 @@ def get_dependency_data():
 
 
 def get_data_val(dataset, ratio):
-  import pdb
-  pdb.set_trace()
   if dataset == "ppi":
     return get_ppi(ratio)
   xtrfile = "/iesl/canvas/pedram/mlcond/%s.ts.ev" % dataset
