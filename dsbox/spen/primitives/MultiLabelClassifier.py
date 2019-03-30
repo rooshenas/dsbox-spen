@@ -86,7 +86,7 @@ class MultiLabelClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Param
         'version': config.VERSION,
         'name': "dsbox-spen-mlclassifier",
         'description': 'Multi-label classification using SPEN',
-        'python_path': 'd3m.primitives.dsbox.multilabel_classifier',
+        'python_path': 'd3m.primitives.classification.multilabel_classifier.DSBOX',
         'primitive_family': "CLASSIFICATION",
         'algorithm_types': ["DEEP_NEURAL_NETWORK" ],
         'keywords': ['multi-label', 'classification'],
