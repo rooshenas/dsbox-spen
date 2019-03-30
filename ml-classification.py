@@ -77,9 +77,9 @@ def perf(ytr_pred, yval_pred, yts_pred, ydata, yval, ytest):
   tr_avg = np.average(np.sum(np.round(ytr_pred), 1))
   val_avg = np.average(np.sum(np.round(yval_pred), 1))
   test_avg = np.average(np.sum(np.round(yts_pred), 1))
-  print("------- %0.1f %0.1f %0.1f ------ %0.3f %0.3f %0.3f - %0.3f %0.3f %0.3f - %0.3f %0.3f %0.3f ---------------" % (
-  tr_avg, val_avg, test_avg, tr_f1, val_f1, ts_f1, hm_tr, hm_val, hm_ts, ex_tr, ex_val, ex_ts))
-  print("-- best : %0.4f %0.4f" % (best_val_f1, test_f1))
+  print(("------- %0.1f %0.1f %0.1f ------ %0.3f %0.3f %0.3f - %0.3f %0.3f %0.3f - %0.3f %0.3f %0.3f ---------------" % (
+  tr_avg, val_avg, test_avg, tr_f1, val_f1, ts_f1, hm_tr, hm_val, hm_ts, ex_tr, ex_val, ex_ts)))
+  print(("-- best : %0.4f %0.4f" % (best_val_f1, test_f1)))
 
 
 def train_sup(spen, num_steps):
@@ -132,7 +132,7 @@ def train_sup(spen, num_steps):
 
 xdata, xval, xtest, ydata, yval, ytest= get_data_val(dataset,0.3)
 
-print(np.shape(xdata))
+print((np.shape(xdata)))
 
 output_num = np.shape(ydata)[1]
 input_num = np.shape(xdata)[1]

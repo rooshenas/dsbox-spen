@@ -652,8 +652,8 @@ class SPEN:
                 # yr = np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension))
                 yp = self.sess.run(self.yp_h, feed_dict={self.yp_h_ind: yp_ind})
                 yp = np.reshape(yp, (-1, self.config.output_num, self.config.dimension))
-                print("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
-                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(yp, 2)))
+                print(("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
+                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(yp, 2))))
 
             # yp_a.append(np.reshape(yp, (-1, self.config.output_num* self.config.dimension)))
             yp_a.append(yp_ind)
@@ -741,8 +741,8 @@ class SPEN:
             if self.config.loglevel > 5:
                 # yr = np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension))
                 ypn = self.softmax(yp_ind, axis=-1)
-                print("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
-                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(ypn, 2)))
+                print(("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
+                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(ypn, 2))))
 
             # yp_a.append(np.reshape(yp, (-1, self.config.output_num* self.config.dimension)))
             yp_a.append(np.reshape(yp, (-1, self.config.output_num * self.config.dimension)))
@@ -833,8 +833,8 @@ class SPEN:
             if self.config.loglevel > 5:
                 # yr = np.reshape(yp_ind, (-1, self.config.output_num, self.config.dimension))
                 ypn = self.softmax(yp_ind, axis=-1)
-                print("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
-                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(ypn, 2)))
+                print(("energy:", np.average(e), "yind:", np.average(np.sum(np.square(yp_ind), 1)),
+                      "gnorm:", np.average(gnorm), "yp:", np.average(np.max(ypn, 2))))
 
             # yp_a.append(np.reshape(yp, (-1, self.config.output_num* self.config.dimension)))
             yp_a.append(np.reshape(yp, (-1, self.config.output_num * self.config.dimension)))
@@ -912,7 +912,7 @@ class SPEN:
             found_point[iter] = 1 if found else 0
 
             if self.config.loglevel > 0:
-                print("inf, iter:", iter, "found:", found, "score first: ", score_first, "new score", best_score)
+                print(("inf, iter:", iter, "found:", found, "score first: ", score_first, "new score", best_score))
 
             final_best[iter, :] = np.copy(random_proposal_new)
             # if found:
@@ -966,7 +966,7 @@ class SPEN:
                                           np.expand_dims(random_proposal_new, 0), yt=y)
 
                     if self.config.loglevel > 60:
-                        print(iter, l, distance, score, score_first)
+                        print((iter, l, distance, score, score_first))
 
                     if score > best_score:
                         best_score = score
@@ -995,8 +995,8 @@ class SPEN:
                 found = True
             found_point[iter] = 1 if found else 0
             if self.config.loglevel > 40:
-                print("iter:", iter, "found:", found, "score first: ", score_first[0], "new score", best_score[0],
-                      "dist", best_distance, "checked: ", l)
+                print(("iter:", iter, "found:", found, "score first: ", score_first[0], "new score", best_score[0],
+                      "dist", best_distance, "checked: ", l))
 
             final_best[iter, :] = np.copy(random_proposal_new)
             # if found:
@@ -1074,7 +1074,7 @@ class SPEN:
                     fb = self.evaluate(xinput=np.expand_dims(xinput[i], 0), yinput=np.expand_dims(y_better[i], 0))
 
                 if self.config.loglevel > 30:
-                    print(i, fp[0], fb[0], en_p[i], en_better[i])
+                    print((i, fp[0], fb[0], en_p[i], en_better[i]))
 
                 fh.append(fb[0])
                 fl.append(fp[0])
@@ -1146,10 +1146,10 @@ class SPEN:
         # y2 = np.argmax(y_a[-1],2)
         if self.config.loglevel > 25:
             for t in range(xinput.shape[0]):
-                print(t, f_a[-2][t], f_a[-1][t], en_a[-2][t], en_a[-1][t])
+                print((t, f_a[-2][t], f_a[-1][t], en_a[-2][t], en_a[-1][t]))
 
         size = np.shape(xinput)[0]
-        t = np.array(range(size))
+        t = np.array(list(range(size)))
         f1 = []
         f2 = []
         y1 = []
@@ -1209,13 +1209,13 @@ class SPEN:
         yp = y_a[-1]
         if self.config.loglevel > 4:
             for t in range(xinput.shape[0]):
-                print(t, f_a[-2][t], f_a[-1][t], np.argmax(yp, 2)[t][:10])
+                print((t, f_a[-2][t], f_a[-1][t], np.argmax(yp, 2)[t][:10]))
 
                 # print (np.average(en_a, axis=1))
                 # print (np.average(f_a, axis=1))
 
         size = np.shape(xinput)[0]
-        t = np.array(range(size))
+        t = np.array(list(range(size)))
         f1 = []
         f2 = []
         y1 = []
@@ -1289,7 +1289,7 @@ class SPEN:
         # print(np.average(ce_a, axis=1))
 
         size = np.shape(xinput)[0]
-        t = np.array(range(size))
+        t = np.array(list(range(size)))
         y = []
         yp = []
         x = []
@@ -1350,9 +1350,9 @@ class SPEN:
                                               self.inf_penalty_weight_ph: self.config.inf_penalty,
                                               self.dropout_ph: self.config.dropout})
         for t in range(xinput.shape[0]):
-            print("t = " + str(t) + " energy: ", str(en[t]))
-            print("logits ", np.sum(logits[t, :]), logits[t, 1020:1025])
-            print("y ", np.sum(y_a[-1, t, :]), y_a[-1, t, 1020:1025])
+            print(("t = " + str(t) + " energy: ", str(en[t])))
+            print(("logits ", np.sum(logits[t, :]), logits[t, 1020:1025]))
+            print(("y ", np.sum(y_a[-1, t, :]), y_a[-1, t, 1020:1025]))
 
     def soft_predict(self, xinput=None, yinit=None, train=False, inf_iter=None, ascent=True, end2end=False):
         tflearn.is_training(is_training=train, session=self.sess)
@@ -1416,7 +1416,7 @@ class SPEN:
             else:
                 if self.config.verbose > 3:
                     for k in range(self.config.inf_iter):
-                        print(np.average(en_ar[k]))
+                        print((np.average(en_ar[k])))
                 yp_ar = soft_yp_ar
             return yp_ar
         else:
@@ -1479,7 +1479,7 @@ class SPEN:
         ce_a = np.array(
             [-np.sum(yinput * np.log(1e-20 + np.reshape(y_p, (-1, self.config.output_num * self.config.dimension))), 1)
              for y_p in yp_a])
-        print("en:", np.average(en_a, axis=1), "ce:", np.average(ce_a, axis=1))
+        print(("en:", np.average(en_a, axis=1), "ce:", np.average(ce_a, axis=1)))
 
         return self.softmax(yp_a[-1], axis=2, theta=1)
 
@@ -1503,7 +1503,7 @@ class SPEN:
             indices = np.arange(0, total)
             # for b in range(total/bs + 1 ):
             if l_l.shape[0] <= 0:
-                print
+                print()
                 "skip"
                 return
 
@@ -1524,8 +1524,8 @@ class SPEN:
 
             if verbose > 0:
                 # print("************************************************************************************************")
-                print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0],
-                      np.average(l_l))
+                print((self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0],
+                      np.average(l_l)))
         return
 
 
@@ -1547,7 +1547,7 @@ class SPEN:
             indices = np.arange(0, total)
             # for b in range(total/bs + 1 ):
             if l_l.shape[0] <= 0:
-                print "skip"
+                print("skip")
                 return
 
             #  perm = np.random.permutation(range(total))
@@ -1568,7 +1568,7 @@ class SPEN:
             if verbose > 0:
 
                 # print("************************************************************************************************")
-                print(self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0], np.average(l_l))
+                print((self.train_iter, o1, g, v1, v2, e1, e2, dist, np.shape(xbatch)[0], np.shape(x_b)[0], np.average(l_l)))
         return
 
 
@@ -1587,7 +1587,7 @@ class SPEN:
 
 
         if verbose > 0:
-            print(self.train_iter, o )
+            print((self.train_iter, o ))
         return
 
     def train_supervised_batch(self, xbatch, ybatch, yinit=None, verbose=0):
@@ -1614,7 +1614,7 @@ class SPEN:
             [self.train_step, self.objective, self.ce, self.num_update, self.total_energy_yt, self.total_energy_yp],
             feed_dict=feeddic)
         if verbose > 0:
-            print(self.train_iter, o, n, en_yt, en_yhat)
+            print((self.train_iter, o, n, en_yt, en_yhat))
         return n
 
     def train_supervised_value_batch(self, xbatch, ybatch, yinit=None, verbose=0):
@@ -1648,7 +1648,7 @@ class SPEN:
 
         _, o, ce, en = self.sess.run([self.train_step, self.objective, self.newce, self.en], feed_dict=feeddic)
         if verbose > 0:
-            print(self.train_iter, o, ce, np.sum(v), en)
+            print((self.train_iter, o, ce, np.sum(v), en))
         return 1
 
     def train_supervised_e2e_batch(self, xbatch, ybatch, verbose=0):
@@ -1684,8 +1684,8 @@ class SPEN:
             if verbose > 0:
                 print("---------------------------------------------------------")
                 for k in range(self.config.inf_iter):
-                    print(np.average(np.linalg.norm(g_ar[k], axis=1)), np.average(np.linalg.norm(h_ar[k], axis=1)),
-                          np.average(en_ar[k]), )
+                    print((np.average(np.linalg.norm(g_ar[k], axis=1)), np.average(np.linalg.norm(h_ar[k], axis=1)),
+                          np.average(en_ar[k]), ))
         return o
 
     def train_supervised_e2e_batch2(self, xbatch, ybatch, verbose=0):

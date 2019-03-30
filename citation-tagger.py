@@ -64,8 +64,8 @@ def perf(ytr_pred, yval_pred, yts_pred, ydata, yval, ytest):
   if ex_val > best_val:
     best_val = ex_val
     test_val = ex_ts
-  print ("Train: %0.3f Val: %0.3f Test: %0.3f ------ Best Val: %0.3f Test: %0.3f" % (
-      ex_tr, ex_val, ex_ts, best_val, test_val))
+  print(("Train: %0.3f Val: %0.3f Test: %0.3f ------ Best Val: %0.3f Test: %0.3f" % (
+      ex_tr, ex_val, ex_ts, best_val, test_val)))
 
 def train_sup(spen, num_steps):
   global ln
@@ -113,7 +113,7 @@ def train_sup(spen, num_steps):
       o = spen.train_batch(xbatch, ybatch, verbose=0)
 
 
-      print (i, b, o, bs)
+      print((i, b, o, bs))
 
 
     yts_out = spen.map_predict(xtest)
@@ -135,7 +135,7 @@ with open('/iesl/canvas/pedram/CORA/trained_embedding.pickle') as f:
   vocabulary_size = 20608
   embedding_size = 100
 
-print(np.shape(xdata))
+print((np.shape(xdata)))
 
 output_num = np.shape(ydata)[1]
 input_num = np.shape(xdata)[1]

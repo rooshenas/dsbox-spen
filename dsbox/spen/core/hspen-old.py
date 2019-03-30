@@ -222,7 +222,7 @@ class HSPEN:
 
     f_a = np.array([self.eval(xd, y_i, yt=yt) for y_i in yp_a])
     size = np.shape(xd)[0]
-    t = np.array(range(size))
+    t = np.array(list(range(size)))
     f1 = []
     f2 = []
     h1 = []
@@ -239,7 +239,7 @@ class HSPEN:
       i_1 = np.argmax(fa_s, 0)
       i_2 = np.argmin(fa_s, 0)
       violatations = np.array([fa_s[i_1[i],i] - fa_s[i_2[i],i] - en_s[i_1[i],i] + en_s[i_2[i],i] for i in t])
-      ti = np.array(range(len(t)))
+      ti = np.array(list(range(len(t))))
       tk = ti[np.where(violatations[ti]>0)]
       traces.append(len(tk))
       for i in tk:
@@ -343,7 +343,7 @@ class HSPEN:
                               feed_dict={self.x: xbatch, self.y: ybatch_ind, self.h: self.hpredict(xbatch),
                                          self.learning_rate_ph: self.config.learning_rate,
                                          self.dropout_ph: self.config.dropout })
-        print (j,o2)
+        print((j,o2))
 
 
 
@@ -369,7 +369,7 @@ class HSPEN:
                                                self.num_update,self.v1_sum, self.v2_sum,
                                                self.e1_sum, self.e2_sum, self.yp1],
                                               feed_dict=feeddic )
-    print (obj,n, v1,v2,e1,e2)
+    print((obj,n, v1,v2,e1,e2))
     #print ("yp:", yp[0,0,:])
     #print ("yt:", yd_ind[0,0,:])
     return obj,  np.shape(xd)[0]
