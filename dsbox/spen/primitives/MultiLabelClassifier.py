@@ -3,6 +3,7 @@ import importlib
 import logging
 import pandas as pd
 import numpy as np
+import copy
 
 # importing d3m stuff
 from d3m import exceptions
@@ -73,9 +74,13 @@ class MLCHyperparams(hyperparams.Hyperparams):
         default=100,
         description='Learning rate used during training (fit).'       
     )
+    bib = hyperparams.Hyperparameter[bool](
+        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
+        default=False,
+        description='Learning rate used during training (fit).'       
+    )
 
-
-class MultiLabelClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHyperparams]):
+class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHyperparams]):
     """
     Multi-label classfier primitive
     """
@@ -118,10 +123,10 @@ class MultiLabelClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Param
         self._epochs = self.hyperparams["epochs"]
         self._batch_size = self.hyperparams["batch_size"]
         self._config = cf.Config()
-        self._config.learning_rate=float(self.hyperparams["lr"])
-        self._config.weight_decay=float(self.hyperparams["lr_decay"])
-        self._config.dropout=float(self.hyperparams["dropout_rate"])
-        self._config.dimension=int(self.hyperparams["dimension"])
+        self._config.learning_rate=self.hyperparams["lr"]
+        self._config.weight_decay=self.hyperparams["lr_decay"]
+        self._config.dropout=self.hyperparams["dropout_rate"]
+        self._config.dimension=self.hyperparams["dimension"]
         self._config.pred_layer_info=[(self.hyperparams["pred_layer_size"],
                              self.hyperparams["pred_layer_type"])]
     def get_params(self) -> Params:
@@ -147,15 +152,19 @@ class MultiLabelClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Param
             raise ValueError('Training data sequences "inputs" and "outputs" should have the same length.')
         # self._training_size = len(inputs)
         # self._training_inputs = inputs.values
-        if 'd3m_index' in outputs.columns:
-            self._index = outputs['d3m_index'].tolist()
-        outputs=outputs.drop(columns=["d3m_index"])
+        if 'd3mIndex' in outputs.columns:
+            self._index = outputs['d3mIndex'].tolist()
+            outputs=outputs.drop(columns=["d3mIndex"])
         self._label_name = outputs.columns[0]
         self._features = list(inputs.columns)
         inputs = inputs.values
         outputs = outputs.values.ravel()
-        self._labels = list(self._get_labels(outputs)) # classes
-        outputs = self._bit_mapper(outputs, self._labels)
+        if self.hyperparams['bib']:
+            self._labels = list(self._get_labels_bib(outputs)) # only works for bibtex
+            outputs = self._bit_mapper_bib(outputs, self._labels)
+        else:
+            self._labels = list(self._get_labels(outputs)) # general
+            outputs = self._bit_mapper(outputs, self._labels)
         self._training_inputs, self._val_inputs = inputs[:int(len(inputs)*0.8)], inputs[int(len(inputs)*0.8):]
         self._training_outputs, self._val_outputs = outputs[:int(len(inputs)*0.8)], outputs[int(len(inputs)*0.8):]
         self._config.input_num = self._training_inputs.shape[1]
@@ -197,19 +206,44 @@ class MultiLabelClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Param
         print("start producing")
         if not self._model:
             raise ValueError("model is not fitted or loaded")
-        res = self._model.map_predict(xinput=inputs)
-        res_df = DataFrame(data=np.array([self._index,
-                                            self._genearte_outputs(res)]).T,
-                           columns=['d3m_index', self._label_name])
+        inputs_nd=inputs.values
+        res = self._model.map_predict(xinput=inputs_nd)
+        if 'd3mIndex' in inputs.columns:
+            index = inputs['d3mIndex']
+            if not self.hyperparams['bib']:
+                res_df = DataFrame(data=np.array([index,
+                                                    self._genearte_outputs(res)]).T,
+                                columns=['d3mIndex', self._label_name])
+            else:
+                res_df = DataFrame(data=np.array([index,
+                                                    self._genearte_outputs_bib(res)]).T,
+                                columns=['d3mIndex', self._label_name])    
+        else:
+            res_df = DataFrame(data=np.array(self._genearte_outputs(res)).T, columns=[self._label_name])      
         self._has_finished = True
         self._iterations_done = True
         print("finished")
         return CallResult(res_df, self._has_finished, self._iterations_done)
     
 
-    def _genearte_outputs(self, res): # need improve
+    def _genearte_outputs(self, res):
         output = []
-        labels = list(self._labels)
+        labels = sorted(list(self._labels))
+        for i in range(len(res)):
+            for j, v in enumerate(list(res[i,:])):
+                if v == 1.0:
+                    output.append(labels[j])
+                    break
+                if j == len(list(res[i,:]))-1:
+                    output.append((labels[-1]))
+                    break
+        return output
+
+
+    def _genearte_outputs_bib(self, res): # need improve
+        output = []
+        labels = sorted(list(self._labels))
+
         for i in range(len(res)):
             tmp = []
             for j, v in enumerate(list(res[i,:])):
@@ -219,8 +253,14 @@ class MultiLabelClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Param
             output.append(val)
         return output 
 
-
     def _get_labels(self, target):
+        label_set = set()
+        for v in target:
+            label_set.add(v)
+        return label_set
+
+
+    def _get_labels_bib(self, target):
         label_set = set()
         for v in target:
             if v.startswith("["):
@@ -231,8 +271,17 @@ class MultiLabelClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Param
                     label_set.add(int(word))
         return label_set
     
-
     def _bit_mapper(self, target, label_set):
+        columns_list = sorted(list(label_set))
+        res_target = np.zeros((len(target), len(columns_list)))
+        target_copy = copy.copy(target)
+        for i in range(target_copy.shape[0]):
+            j = columns_list.index(target_copy[i])
+            res_target[i, j] = 1
+        return res_target
+
+
+    def _bit_mapper_bib(self, target, label_set):
         columns_list = sorted(list(label_set))
         res_target = np.zeros((len(target), len(columns_list)))
         for i, v in enumerate(target.tolist()):
