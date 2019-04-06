@@ -208,11 +208,7 @@
                 "version": "0.1.0",
                 "python_path": "d3m.primitives.classification.multilabel_classifier.DSBOX",
                 "name": "dsbox-spen-mlclassifier",
-<<<<<<< HEAD
-                "digest": "8f9322dac3f472f0d9f1b38a7988a168e6d642dffd61a72bfe43e59d37c3f202"
-=======
                 "digest": "9fc13b288c2138b198909de549dc855a5e5d84989f98898b1d7db30042b4e003"
->>>>>>> 953d68596475ad8c5b2ee28deb24fdd9f17c8df6
             },
             "arguments": {
                 "inputs": {
@@ -231,10 +227,5 @@
             ]
         }
     ],
-<<<<<<< HEAD
-    "digest": "dd635699ba352705e53ee9e15c967f8377e7d40a4dc2d317e7658f7622b96b37"
-}
-=======
     "digest": "349c16727c9ce2f27f7220ed14022b3cde2761eee7f7162dd0057e6623009811"
 }
->>>>>>> 953d68596475ad8c5b2ee28deb24fdd9f17c8df6
