@@ -1,1 +1,231 @@
-{"id": "MLC", "schema": "https://metadata.datadrivendiscovery.org/schemas/v0/pipeline.json", "created": "2019-04-06T08:10:53.351245Z", "context": "TESTING", "inputs": [{"name": "inputs"}], "outputs": [{"data": "steps.8.produce", "name": "final"}], "steps": [{"type": "PRIMITIVE", "primitive": {"id": "dsbox-denormalize(from d3m)", "version": "1.4.4", "python_path": "d3m.primitives.normalization.denormalize.DSBOX", "name": "DSBox denormalize", "digest": "a1c81a26989a720045893d504f2fa46a2a287c8cc25adcc364a703bbe100b633"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "inputs.0"}}, "outputs": [{"id": "produce"}]}, {"type": "PRIMITIVE", "primitive": {"id": "4b42ce1e-9b98-4a25-b68e-fad13311eb65", "version": "0.3.0", "python_path": "d3m.primitives.data_transformation.dataset_to_dataframe.Common", "name": "Extract a DataFrame from a Dataset", "digest": "f399b299f15daed778a53bd13b0dbf0841ce53cfbcd71c141947f34d7dc29ac3"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "steps.0.produce"}}, "outputs": [{"id": "produce"}]}, {"type": "PRIMITIVE", "primitive": {"id": "4503a4c6-42f7-45a1-a1d4-ed69699cf5e1", "version": "0.2.0", "python_path": "d3m.primitives.data_transformation.extract_columns_by_semantic_types.DataFrameCommon", "name": "Extracts columns by semantic type", "digest": "8ba4e5c0be66d3122b0d9e2f6a3d774aa8cac954eebd5bd52df20bc85f39520b"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "steps.1.produce"}}, "outputs": [{"id": "produce"}], "hyperparams": {"semantic_types": {"type": "VALUE", "data": ["https://metadata.datadrivendiscovery.org/types/PrimaryKey", "https://metadata.datadrivendiscovery.org/types/Attribute"]}}}, {"type": "PRIMITIVE", "primitive": {"id": "4503a4c6-42f7-45a1-a1d4-ed69699cf5e1", "version": "0.2.0", "python_path": "d3m.primitives.data_transformation.extract_columns_by_semantic_types.DataFrameCommon", "name": "Extracts columns by semantic type", "digest": "8ba4e5c0be66d3122b0d9e2f6a3d774aa8cac954eebd5bd52df20bc85f39520b"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "steps.1.produce"}}, "outputs": [{"id": "produce"}], "hyperparams": {"semantic_types": {"type": "VALUE", "data": ["https://metadata.datadrivendiscovery.org/types/PrimaryKey", "https://metadata.datadrivendiscovery.org/types/SuggestTarget"]}}}, {"type": "PRIMITIVE", "primitive": {"id": "dsbox-cleaning-featurizer", "version": "1.4.4", "python_path": "d3m.primitives.data_cleaning.cleaning_featurizer.DSBOX", "name": "DSBox Cleaning Featurizer", "digest": "843e8df428bd8826c7deac31b9088d1d89c10560c4fd6190cb7f974aaaa3a337"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "steps.2.produce"}}, "outputs": [{"id": "produce"}]}, {"type": "PRIMITIVE", "primitive": {"id": "18f0bb42-6350-3753-8f2d-d1c3da70f279", "version": "1.4.4", "python_path": "d3m.primitives.data_preprocessing.encoder.DSBOX", "name": "ISI DSBox Data Encoder", "digest": "6e15ca616c5cf44cc89dfc143d26bf67193f539f39b179a4861276414d61949f"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "steps.4.produce"}}, "outputs": [{"id": "produce"}]}, {"type": "PRIMITIVE", "primitive": {"id": "7894b699-61e9-3a50-ac9f-9bc510466667", "version": "1.4.4", "python_path": "d3m.primitives.data_preprocessing.mean_imputation.DSBOX", "name": "DSBox Mean Imputer", "digest": "87f9aa5b5c01358f61b38cd861714cb3788f6facdad990a3b8367af42b6d5981"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "steps.5.produce"}}, "outputs": [{"id": "produce"}]}, {"type": "PRIMITIVE", "primitive": {"id": "7ddf2fd8-2f7f-4e53-96a7-0d9f5aeecf93", "version": "1.4.4", "python_path": "d3m.primitives.data_transformation.to_numeric.DSBOX", "name": "ISI DSBox To Numeric DataFrame", "digest": "47ab82f1a55f664c2f239810811ebf933b474167b56d25fd2b33f897c3a917f0"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "steps.6.produce"}}, "outputs": [{"id": "produce"}]}, {"type": "PRIMITIVE", "primitive": {"id": "2dfa8611-a55d-47d6-afb6-e5d531cf5281", "version": "0.1.0", "python_path": "d3m.primitives.classification.multilabel_classifier.DSBOX", "name": "dsbox-spen-mlclassifier", "digest": "afb324c5a2061cd69abd7e32f7cd42ff489e907d388909e14611618ed5ae8e35"}, "arguments": {"inputs": {"type": "CONTAINER", "data": "steps.7.produce"}, "outputs": {"type": "CONTAINER", "data": "steps.3.produce"}}, "outputs": [{"id": "produce"}]}], "digest": "50385ceec98900f2b01dd46b4e5ceb2f19090268b6ae8d55c72453ba32cba1cb"}
+{
+    "id": "MLC",
+    "schema": "https://metadata.datadrivendiscovery.org/schemas/v0/pipeline.json",
+    "created": "2019-04-06T08:41:48.779473Z",
+    "context": "TESTING",
+    "inputs": [
+        {
+            "name": "inputs"
+        }
+    ],
+    "outputs": [
+        {
+            "data": "steps.8.produce",
+            "name": "final"
+        }
+    ],
+    "steps": [
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "dsbox-denormalize(from d3m)",
+                "version": "1.4.4",
+                "python_path": "d3m.primitives.normalization.denormalize.DSBOX",
+                "name": "DSBox denormalize",
+                "digest": "a1c81a26989a720045893d504f2fa46a2a287c8cc25adcc364a703bbe100b633"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "inputs.0"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ]
+        },
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "4b42ce1e-9b98-4a25-b68e-fad13311eb65",
+                "version": "0.3.0",
+                "python_path": "d3m.primitives.data_transformation.dataset_to_dataframe.Common",
+                "name": "Extract a DataFrame from a Dataset",
+                "digest": "f399b299f15daed778a53bd13b0dbf0841ce53cfbcd71c141947f34d7dc29ac3"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.0.produce"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ]
+        },
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "4503a4c6-42f7-45a1-a1d4-ed69699cf5e1",
+                "version": "0.2.0",
+                "python_path": "d3m.primitives.data_transformation.extract_columns_by_semantic_types.DataFrameCommon",
+                "name": "Extracts columns by semantic type",
+                "digest": "8ba4e5c0be66d3122b0d9e2f6a3d774aa8cac954eebd5bd52df20bc85f39520b"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.1.produce"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ],
+            "hyperparams": {
+                "semantic_types": {
+                    "type": "VALUE",
+                    "data": [
+                        "https://metadata.datadrivendiscovery.org/types/PrimaryKey",
+                        "https://metadata.datadrivendiscovery.org/types/Attribute"
+                    ]
+                }
+            }
+        },
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "4503a4c6-42f7-45a1-a1d4-ed69699cf5e1",
+                "version": "0.2.0",
+                "python_path": "d3m.primitives.data_transformation.extract_columns_by_semantic_types.DataFrameCommon",
+                "name": "Extracts columns by semantic type",
+                "digest": "8ba4e5c0be66d3122b0d9e2f6a3d774aa8cac954eebd5bd52df20bc85f39520b"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.1.produce"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ],
+            "hyperparams": {
+                "semantic_types": {
+                    "type": "VALUE",
+                    "data": [
+                        "https://metadata.datadrivendiscovery.org/types/PrimaryKey",
+                        "https://metadata.datadrivendiscovery.org/types/SuggestTarget"
+                    ]
+                }
+            }
+        },
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "dsbox-cleaning-featurizer",
+                "version": "1.4.4",
+                "python_path": "d3m.primitives.data_cleaning.cleaning_featurizer.DSBOX",
+                "name": "DSBox Cleaning Featurizer",
+                "digest": "843e8df428bd8826c7deac31b9088d1d89c10560c4fd6190cb7f974aaaa3a337"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.2.produce"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ]
+        },
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "18f0bb42-6350-3753-8f2d-d1c3da70f279",
+                "version": "1.4.4",
+                "python_path": "d3m.primitives.data_preprocessing.encoder.DSBOX",
+                "name": "ISI DSBox Data Encoder",
+                "digest": "6e15ca616c5cf44cc89dfc143d26bf67193f539f39b179a4861276414d61949f"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.4.produce"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ]
+        },
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "7894b699-61e9-3a50-ac9f-9bc510466667",
+                "version": "1.4.4",
+                "python_path": "d3m.primitives.data_preprocessing.mean_imputation.DSBOX",
+                "name": "DSBox Mean Imputer",
+                "digest": "87f9aa5b5c01358f61b38cd861714cb3788f6facdad990a3b8367af42b6d5981"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.5.produce"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ]
+        },
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "7ddf2fd8-2f7f-4e53-96a7-0d9f5aeecf93",
+                "version": "1.4.4",
+                "python_path": "d3m.primitives.data_transformation.to_numeric.DSBOX",
+                "name": "ISI DSBox To Numeric DataFrame",
+                "digest": "47ab82f1a55f664c2f239810811ebf933b474167b56d25fd2b33f897c3a917f0"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.6.produce"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ]
+        },
+        {
+            "type": "PRIMITIVE",
+            "primitive": {
+                "id": "2dfa8611-a55d-47d6-afb6-e5d531cf5281",
+                "version": "0.1.0",
+                "python_path": "d3m.primitives.classification.multilabel_classifier.DSBOX",
+                "name": "dsbox-spen-mlclassifier",
+                "digest": "9fc13b288c2138b198909de549dc855a5e5d84989f98898b1d7db30042b4e003"
+            },
+            "arguments": {
+                "inputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.7.produce"
+                },
+                "outputs": {
+                    "type": "CONTAINER",
+                    "data": "steps.3.produce"
+                }
+            },
+            "outputs": [
+                {
+                    "id": "produce"
+                }
+            ]
+        }
+    ],
+    "digest": "349c16727c9ce2f27f7220ed14022b3cde2761eee7f7162dd0057e6623009811"
+}
