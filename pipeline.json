@@ -1,7 +1,7 @@
 {
     "id": "MLC",
     "schema": "https://metadata.datadrivendiscovery.org/schemas/v0/pipeline.json",
-    "created": "2019-04-06T08:41:48.779473Z",
+    "created": "2019-04-06T09:12:33.752187Z",
     "context": "TESTING",
     "inputs": [
         {
@@ -112,7 +112,7 @@
                     "type": "VALUE",
                     "data": [
                         "https://metadata.datadrivendiscovery.org/types/PrimaryKey",
-                        "https://metadata.datadrivendiscovery.org/types/SuggestTarget"
+                        "https://metadata.datadrivendiscovery.org/types/SuggestedTarget"
                     ]
                 }
             }
@@ -208,7 +208,7 @@
                 "version": "0.1.0",
                 "python_path": "d3m.primitives.classification.multilabel_classifier.DSBOX",
                 "name": "dsbox-spen-mlclassifier",
-                "digest": "9fc13b288c2138b198909de549dc855a5e5d84989f98898b1d7db30042b4e003"
+                "digest": "9059fd37a90428ec8c8e5b04fd19632a2b39e2a8451f2bf780c97d17620a18be"
             },
             "arguments": {
                 "inputs": {
@@ -227,5 +227,5 @@
             ]
         }
     ],
-    "digest": "349c16727c9ce2f27f7220ed14022b3cde2761eee7f7162dd0057e6623009811"
+    "digest": "eada39bb7e1d16f35f97e5d50a623676c1c85d29f43cdb3ddd80dd6261b2a71e"
 }
