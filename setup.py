@@ -20,7 +20,7 @@ setup(name='dsbox-spen',
       install_requires=[
           'scipy>=0.19.0,<1.2', 'numpy>=1.11.1', 'pandas>=0.20.1',
           'python-dateutil>=2.5.2', 'six>=1.10.0', 'stopit==1.1.2',
-          'scikit-learn>=0.18.0',
+          'scikit-learn>=0.18.0','tflearn',
           'Keras==2.2.4', 'Pillow==5.1.0', 'tensorflow==1.12', 'h5py<=2.7.1'
       ],
       keywords='d3m_primitive',
