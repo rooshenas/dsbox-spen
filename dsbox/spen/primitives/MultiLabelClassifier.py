@@ -22,8 +22,8 @@ Inputs = DataFrame
 Outputs = DataFrame
 
 class Params(params.Params):
-    _mlp_model: mlp.MLP
-    _class_name_to_number: typing.List[int]
+    _mlp_model_config: mlp.MLP.config
+    _class_name_to_number: typing.List[str]
     _target_column_name: str
     _features: typing.List[str]
     _index: typing.List[int]
@@ -37,47 +37,47 @@ class MLCHyperparams(hyperparams.Hyperparams):
     lr_decay = hyperparams.Hyperparameter[float](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=1e-6,
-        description='Learning rate used during training (fit).'
+        description='Learning rate decay.'
     )
     l2_penalty = hyperparams.Hyperparameter[float](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=1e-2,
-        description='Learning rate used during training (fit).'
+        description='L2 penalty'
     )
     dropout_rate = hyperparams.Hyperparameter[float](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=0.1,
-        description='Learning rate used during training (fit).'
+        description='Dropout rate'
     )
     dimension = hyperparams.Hyperparameter[int](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=2,
-        description='Learning rate used during training (fit).'
+        description='Dimension'
     )
     pred_layer_size = hyperparams.Hyperparameter[int](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=2000,
-        description='Learning rate used during training (fit).'       
+        description='Prediction layer size'       
     )
     pred_layer_type = hyperparams.Hyperparameter[str](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default="relu",
-        description='Learning rate used during training (fit).'       
+        description='Prediction layer type'       
     )
     epochs = hyperparams.Hyperparameter[int](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=5,
-        description='Learning rate used during training (fit).'       
+        description='Epochs'       
     )
     batch_size = hyperparams.Hyperparameter[int](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=100,
-        description='Learning rate used during training (fit).'       
+        description='Batch size'       
     )
     bib = hyperparams.Hyperparameter[bool](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=False,
-        description='Learning rate used during training (fit).'       
+        description='Bibtext dataset is a special dataset with different way for data processing, this params is to check whether or not'       
     )
 
 class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHyperparams]):
@@ -131,7 +131,7 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
                              self.hyperparams["pred_layer_type"])]
     def get_params(self) -> Params:
         param = Params(
-                        _mlp_model = self._model,
+                        _mlp_model_config = self._config,
                         _class_name_to_number = self._labels,
                         _target_column_name = self._label_name,
                         _features = self._features,
@@ -140,11 +140,12 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         return param
 
     def set_params(self, *, params: Params) -> None:
-        self._model = params["_mlp_model"]
+        self._config = params["_mlp_model_config"]
         self._labels = params["_class_name_to_number"]
         self._label_name = params["_target_column_name"]
         self._features = params["_features"]
         self._index = params["_index"]
+        self._model = mlp.MLP(self._config)
 
 
     def set_training_data(self, *, inputs: Inputs, outputs: Outputs) -> None:
