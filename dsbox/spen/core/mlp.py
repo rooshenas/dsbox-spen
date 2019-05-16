@@ -53,12 +53,12 @@ class MLP:
         return l + 1.2 * (tf.reduce_sum(yp_zeros) - tf.reduce_sum(yp_ones))
 
     def get_feature_net_mlp(self, xinput, output_num, reuse=False):
-        print(output_num)
+        # print(output_num)
 
         net = xinput
         j = 0
         for (sz, a) in self.config.layer_info:
-            print((sz, a))
+            # print((sz, a))
             net = tflearn.fully_connected(net, sz,
                                           weight_decay=self.config.weight_decay,
                                           # weights_init=tfi.variance_scaling(,
@@ -82,7 +82,7 @@ class MLP:
 
     def softmax_prediction_network2(self, xinput=None, reuse=False):
         net = xinput
-        print(("xinput", xinput))
+        # print(("xinput", xinput))
         with tf.variable_scope("pred") as scope:
             net = tflearn.fully_connected(net, 1000, regularizer='L2',
                                           weight_decay=self.config.weight_decay,
@@ -108,7 +108,7 @@ class MLP:
         j = 0
         with tf.variable_scope("pred") as scope:
             for (sz, a) in self.config.pred_layer_info:
-                print((sz, a))
+                # print((sz, a))
                 net = tflearn.fully_connected(net, sz, regularizer='L2', activation=a,
                                               weight_decay=self.config.weight_decay,
                                               weights_init=tfi.variance_scaling(),
@@ -152,7 +152,7 @@ class MLP:
         net = tf.concat((hnet, xnet), axis=1)
         with tf.variable_scope("pred") as scope:
             for (sz, a) in self.config.pred_layer_info:
-                print((sz, a))
+                # print((sz, a))
                 net = tflearn.fully_connected(net, sz, regularizer='L2',
                                               weight_decay=self.config.weight_decay,
                                               weights_init=tfi.variance_scaling(),
@@ -305,7 +305,7 @@ class MLP:
         tflearn.is_training(train, self.sess)
         yp = self.sess.run(self.yp, feed_dict={self.x: xinput})
         if self.config.loglevel > 1:
-            print(yp)
+            # print(yp)
         if self.config.dimension > 1:
             return np.argmax(yp, 2)
         else:

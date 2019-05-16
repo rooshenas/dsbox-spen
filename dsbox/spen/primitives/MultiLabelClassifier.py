@@ -22,11 +22,11 @@ Inputs = DataFrame
 Outputs = DataFrame
 
 class Params(params.Params):
-    _mlp_model_config: mlp.MLP.config
+    _mlp_model: mlp.MLP
     _class_name_to_number: typing.List[str]
     _target_column_name: str
     _features: typing.List[str]
-    _index: typing.List[int]
+    _index: typing.List[str]
 
 class MLCHyperparams(hyperparams.Hyperparams):
     lr = hyperparams.Hyperparameter[float](
@@ -131,7 +131,7 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
                              self.hyperparams["pred_layer_type"])]
     def get_params(self) -> Params:
         param = Params(
-                        _mlp_model_config = self._config,
+                        _mlp_model = self._model,
                         _class_name_to_number = self._labels,
                         _target_column_name = self._label_name,
                         _features = self._features,
@@ -140,12 +140,11 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         return param
 
     def set_params(self, *, params: Params) -> None:
-        self._config = params["_mlp_model_config"]
+        self._model = params["_mlp_model"]
         self._labels = params["_class_name_to_number"]
         self._label_name = params["_target_column_name"]
         self._features = params["_features"]
         self._index = params["_index"]
-        self._model = mlp.MLP(self._config)
 
 
     def set_training_data(self, *, inputs: Inputs, outputs: Outputs) -> None:
@@ -300,12 +299,11 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         global tf
         tf = importlib.import_module("tensorflow")
         tf.reset_default_graph()
-        print(self._config.input_num, self._config.output_num)
+        # print(self._config.input_num, self._config.output_num)
         m = mlp.MLP(self._config)
         m.createOptimizer()
         m.get_loss = m.ce_loss
         m.get_prediction_network = m.mlp_prediction_network
         m.construct()
-        m.print_vars()
         m.init()
         return m
