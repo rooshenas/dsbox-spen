@@ -305,7 +305,8 @@ class MLP:
         tflearn.is_training(train, self.sess)
         yp = self.sess.run(self.yp, feed_dict={self.x: xinput})
         if self.config.loglevel > 1:
-            # print(yp)
+            print(yp)
+            
         if self.config.dimension > 1:
             return np.argmax(yp, 2)
         else:
