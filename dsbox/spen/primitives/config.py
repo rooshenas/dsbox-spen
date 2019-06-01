@@ -14,7 +14,7 @@ REPOSITORY = "https://github.com/rooshenas/dsbox-spen"
 PACAKGE_NAME = "dsbox-spen"
 
 D3M_PERFORMER_TEAM = 'UMASS'
-D3M_CONTACT = "kyao:kyao@isi.edu"
+D3M_CONTACT = "pedram:pedram@cs.umass.edu"
 
 if TAG_NAME:
     PACKAGE_URI = "git+" + REPOSITORY + "@" + TAG_NAME
