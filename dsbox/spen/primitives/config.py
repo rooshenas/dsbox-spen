@@ -4,7 +4,7 @@ from d3m import utils
 try:
     import d3m.__init__ as d3m_info
     D3M_API_VERSION = d3m_info.__version__
-except:
+except Exception:
     D3M_API_VERSION = '2019.2.18'
 
 VERSION = "0.1.0"

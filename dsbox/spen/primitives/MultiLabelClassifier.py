@@ -1,17 +1,14 @@
 import typing
 import importlib
-import logging
-import pandas as pd
 import numpy as np
 import copy
 
 # importing d3m stuff
 from d3m import exceptions
 from d3m.container.pandas import DataFrame
-from d3m.container.list import List
-from d3m.primitive_interfaces.base import CallResult, MultiCallResult
+from d3m.primitive_interfaces.base import CallResult
 from d3m.primitive_interfaces.supervised_learning import SupervisedLearnerPrimitiveBase
-from d3m.metadata import hyperparams, params, base as metadata_base
+from d3m.metadata import hyperparams, params
 
 from dsbox.spen.primitives import config
 from dsbox.spen.core import config as cf, mlp
@@ -21,12 +18,14 @@ from dsbox.spen.utils.datasets import get_layers, get_data_val
 Inputs = DataFrame
 Outputs = DataFrame
 
+
 class Params(params.Params):
     _mlp_model: mlp.MLP
     _class_name_to_number: typing.List[str]
     _target_column_name: str
     _features: typing.List[str]
     _index: typing.List[str]
+
 
 class MLCHyperparams(hyperparams.Hyperparams):
     lr = hyperparams.Hyperparameter[float](
@@ -57,28 +56,29 @@ class MLCHyperparams(hyperparams.Hyperparams):
     pred_layer_size = hyperparams.Hyperparameter[int](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=2000,
-        description='Prediction layer size'       
+        description='Prediction layer size'
     )
     pred_layer_type = hyperparams.Hyperparameter[str](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default="relu",
-        description='Prediction layer type'       
+        description='Prediction layer type'
     )
     epochs = hyperparams.Hyperparameter[int](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=5,
-        description='Epochs'       
+        description='Epochs'
     )
     batch_size = hyperparams.Hyperparameter[int](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=100,
-        description='Batch size'       
+        description='Batch size'
     )
     bib = hyperparams.Hyperparameter[bool](
         semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
         default=False,
-        description='Bibtext dataset is a special dataset with different way for data processing, this params is to check whether or not'       
+        description='Bibtext dataset is a special dataset with different way for data processing, this params is to check whether or not'
     )
+
 
 class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHyperparams]):
     """
@@ -97,6 +97,7 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         'keywords': ['multi-label', 'classification'],
         'source': {
             'name': config.D3M_PERFORMER_TEAM,
+            'contact': config.D3M_CONTACT,
             'uris': [config.REPOSITORY]
         },
         # The same path the primitive is registered with entry points in setup.py.
@@ -108,7 +109,6 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         'precondition': [],
         'hyperparms_to_tune': []
     })
-
 
     def __init__(self, *, hyperparams: MLCHyperparams) -> None:
         super().__init__(hyperparams=hyperparams)
@@ -123,18 +123,19 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         self._epochs = self.hyperparams["epochs"]
         self._batch_size = self.hyperparams["batch_size"]
         self._config = cf.Config()
-        self._config.learning_rate=self.hyperparams["lr"]
-        self._config.weight_decay=self.hyperparams["lr_decay"]
-        self._config.dropout=self.hyperparams["dropout_rate"]
-        self._config.dimension=self.hyperparams["dimension"]
-        self._config.pred_layer_info=[(self.hyperparams["pred_layer_size"],
-                             self.hyperparams["pred_layer_type"])]
+        self._config.learning_rate = self.hyperparams["lr"]
+        self._config.weight_decay = self.hyperparams["lr_decay"]
+        self._config.dropout = self.hyperparams["dropout_rate"]
+        self._config.dimension = self.hyperparams["dimension"]
+        self._config.pred_layer_info = [(self.hyperparams["pred_layer_size"],
+                                         self.hyperparams["pred_layer_type"])]
+
     def get_params(self) -> Params:
         param = Params(
-                        _mlp_model = self._model,
-                        _class_name_to_number = self._labels,
-                        _target_column_name = self._label_name,
-                        _features = self._features,
+                        _mlp_model=self._model,
+                        _class_name_to_number=self._labels,
+                        _target_column_name=self._label_name,
+                        _features=self._features,
                         _index=self._index
                       )
         return param
@@ -146,7 +147,6 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         self._features = params["_features"]
         self._index = params["_index"]
 
-
     def set_training_data(self, *, inputs: Inputs, outputs: Outputs) -> None:
         if len(inputs) != len(outputs):
             raise ValueError('Training data sequences "inputs" and "outputs" should have the same length.')
@@ -154,22 +154,21 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         # self._training_inputs = inputs.values
         if 'd3mIndex' in outputs.columns:
             self._index = outputs['d3mIndex'].tolist()
-            outputs=outputs.drop(columns=["d3mIndex"])
+            outputs = outputs.drop(columns=["d3mIndex"])
         self._label_name = outputs.columns[0]
         self._features = list(inputs.columns)
         inputs = inputs.values
         outputs = outputs.values.ravel()
         if self.hyperparams['bib']:
-            self._labels = list(self._get_labels_bib(outputs)) # only works for bibtex
+            self._labels = list(self._get_labels_bib(outputs))  # only works for bibtex
             outputs = self._bit_mapper_bib(outputs, self._labels)
         else:
-            self._labels = list(self._get_labels(outputs)) # general
+            self._labels = list(self._get_labels(outputs))  # general
             outputs = self._bit_mapper(outputs, self._labels)
         self._training_inputs, self._val_inputs = inputs[:int(len(inputs)*0.8)], inputs[int(len(inputs)*0.8):]
         self._training_outputs, self._val_outputs = outputs[:int(len(inputs)*0.8)], outputs[int(len(inputs)*0.8):]
         self._config.input_num = self._training_inputs.shape[1]
         self._config.output_num = self._training_outputs.shape[1]
-
 
     def fit(self, *, timeout: float = None, iterations: int = None) -> CallResult[None]:
         if self._training_inputs is None:
@@ -191,8 +190,8 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
                 xbatch = self._training_inputs[indices][:]
                 ybatch = self._training_outputs[indices][:]
                 noisex = np.random.normal(xbatch,
-                                          np.random.uniform(0,0.5,
-                                          np.shape(xbatch)[1])*np.std(xbatch,axis=0),
+                                          np.random.uniform(0, 0.5,
+                                                            np.shape(xbatch)[1])*np.std(xbatch, axis=0),
                                           size=np.shape(xbatch))
                 self._model.set_train_iter(i*(ntrain//bs)+b)
                 o = self._model.train_batch(noisex, ybatch, verbose=0)
@@ -206,39 +205,37 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         print("start producing")
         if not self._model:
             raise ValueError("model is not fitted or loaded")
-        inputs_nd=inputs.values
+        inputs_nd = inputs.values
         res = self._model.map_predict(xinput=inputs_nd)
         if 'd3mIndex' in inputs.columns:
             index = inputs['d3mIndex']
             if not self.hyperparams['bib']:
                 res_df = DataFrame(data=np.array([index,
-                                                    self._genearte_outputs(res)]).T,
-                                columns=['d3mIndex', self._label_name])
+                                                  self._genearte_outputs(res)]).T,
+                                   columns=['d3mIndex', self._label_name])
             else:
                 res_df = DataFrame(data=np.array([index,
-                                                    self._genearte_outputs_bib(res)]).T,
-                                columns=['d3mIndex', self._label_name])    
+                                                  self._genearte_outputs_bib(res)]).T,
+                                   columns=['d3mIndex', self._label_name])
         else:
-            res_df = DataFrame(data=np.array(self._genearte_outputs(res)).T, columns=[self._label_name])      
+            res_df = DataFrame(data=np.array(self._genearte_outputs(res)).T, columns=[self._label_name])
         self._has_finished = True
         self._iterations_done = True
         print("finished")
         return CallResult(res_df, self._has_finished, self._iterations_done)
-    
 
     def _genearte_outputs(self, res):
         output = []
         labels = sorted(list(self._labels))
         for i in range(len(res)):
-            for j, v in enumerate(list(res[i,:])):
+            for j, v in enumerate(list(res[i, :])):
                 if v == 1.0:
                     output.append(labels[j])
                     break
-                if j == len(list(res[i,:]))-1:
+                if j == len(list(res[i, :]))-1:
                     output.append((labels[-1]))
                     break
         return output
-
 
     def _genearte_outputs_bib(self, res): # need improve
         output = []
@@ -246,12 +243,12 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
 
         for i in range(len(res)):
             tmp = []
-            for j, v in enumerate(list(res[i,:])):
+            for j, v in enumerate(list(res[i, :])):
                 if v == 1.0:
                     tmp.append(str(labels[j]))
             val = ",".join(tmp)
             output.append(val)
-        return output 
+        return output
 
     def _get_labels(self, target):
         label_set = set()
@@ -259,18 +256,17 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
             label_set.add(v)
         return label_set
 
-
     def _get_labels_bib(self, target):
         label_set = set()
         for v in target:
             if v.startswith("["):
-                for word in v[1,-1].split(","):
+                for word in v[1, -1].split(","):
                     label_set.add(int(word))
             else:
                 for word in v.split(","):
                     label_set.add(int(word))
         return label_set
-    
+
     def _bit_mapper(self, target, label_set):
         columns_list = sorted(list(label_set))
         res_target = np.zeros((len(target), len(columns_list)))
@@ -279,7 +275,6 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
             j = columns_list.index(target_copy[i])
             res_target[i, j] = 1
         return res_target
-
 
     def _bit_mapper_bib(self, target, label_set):
         columns_list = sorted(list(label_set))
