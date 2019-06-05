@@ -1,7 +1,5 @@
 
 from setuptools import setup
-from setuptools.command.develop import develop
-from setuptools.command.install import install
 
 setup(name='dsbox-spen',
       version='1.0.0',
@@ -18,10 +16,18 @@ setup(name='dsbox-spen',
           ],
       python_requires='>=3.6',
       install_requires=[
-          'scipy>=0.19.0,<1.2', 'numpy>=1.11.1', 'pandas>=0.20.1',
-          'python-dateutil>=2.5.2', 'six>=1.10.0', 'stopit==1.1.2',
-          'scikit-learn>=0.18.0','tflearn',
-          'Keras==2.2.4', 'Pillow==5.1.0', 'tensorflow-gpu', 'h5py<=2.7.1'
+          'scipy==1.2.1',
+          'numpy>=1.11.1',
+          'pandas>=0.20.1',
+          'python-dateutil>=2.5.2',
+          'six>=1.10.0',
+          'stopit==1.1.2',
+          'scikit-learn>=0.18.0',
+          'tflearn',
+          'Keras==2.2.4',
+          'Pillow',
+          'tensorflow-gpu',
+          'h5py'
       ],
       keywords='d3m_primitive',
       entry_points={

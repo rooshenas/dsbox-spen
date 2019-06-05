@@ -6,16 +6,16 @@ import subprocess
 from dsbox.spen.primitives import config as spen_config
 
 parser = argparse.ArgumentParser(description='Generate primitive.json descriptions')
-parser.add_argument('--dirname', action='store', default = 'output', help='Top-level directory to store the json descriptions, i.e. primitives_repo directory')
+parser.add_argument('--dirname', action='store', default='output', help='Top-level directory to store the json descriptions, i.e. primitives_repo directory')
 arguments = parser.parse_args()
 
 PREFIX = 'd3m.primitives.'
 PRIMITIVES = []
 
 try:
-    f = open("../setup.py","r")
-except:
-    f = open("setup.py","r")
+    f = open("../setup.py", "r")
+except Exception:
+    f = open("setup.py", "r")
 
 line = f.readline()
 while line:
@@ -30,7 +30,7 @@ while line:
                     primitive_name = primitive_name[:-1]
                 PRIMITIVES.append(primitive_name)
                 line = f.readline()
-            except:
+            except  Exception:
                 break
         break
 f.close()
@@ -45,7 +45,6 @@ for p in PRIMITIVES:
 
     json_filename = os.path.join(outdir, 'primitive.json')
     print('    at ' + json_filename)
-    command = ['python', '-m', 'd3m.index',
-               'describe', '-i', '4', primitive_name]
+    command = ['python', '-m', 'd3m', 'index', 'describe', '-i', '4', primitive_name]
     with open(json_filename, 'w') as out:
         subprocess.run(command, stdout=out)

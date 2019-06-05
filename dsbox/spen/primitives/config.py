@@ -4,17 +4,17 @@ from d3m import utils
 try:
     import d3m.__init__ as d3m_info
     D3M_API_VERSION = d3m_info.__version__
-except:
+except Exception:
     D3M_API_VERSION = '2019.2.18'
 
-VERSION = "0.1.0"
+VERSION = "1.0.0"
 TAG_NAME = "{git_commit}".format(git_commit=utils.current_git_commit(os.path.dirname(__file__)), )
 
 REPOSITORY = "https://github.com/rooshenas/dsbox-spen"
 PACAKGE_NAME = "dsbox-spen"
 
 D3M_PERFORMER_TEAM = 'UMASS'
-D3M_CONTACT = "kyao:kyao@isi.edu"
+D3M_CONTACT = "pedram:pedram@cs.umass.edu"
 
 if TAG_NAME:
     PACKAGE_URI = "git+" + REPOSITORY + "@" + TAG_NAME
