@@ -14,15 +14,19 @@ from d3m.primitive_interfaces.supervised_learning import SupervisedLearnerPrimit
 from d3m.metadata import hyperparams, params, base as metadata_base
 
 from dsbox.spen.primitives import config
-from dsbox.spen.core import config as cf, mlp
+from dsbox.spen.core import config as cf, sg_spen
 from dsbox.spen.utils.metrics import f1_score, hamming_loss
 from dsbox.spen.utils.datasets import get_layers, get_data_val
+import tflearn
+import types
+import tflearn.initializations as tfi
+
 
 Inputs = DataFrame
 Outputs = DataFrame
 
 class Params(params.Params):
-    _mlp_model: mlp.MLP
+    _mlp_model: sg_spen.SPEN
     _class_name_to_number: typing.List[str]
     _target_column_name: str
     _features: typing.List[str]
@@ -129,6 +133,23 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         self._config.dimension=self.hyperparams["dimension"]
         self._config.pred_layer_info=[(self.hyperparams["pred_layer_size"],
                              self.hyperparams["pred_layer_type"])]
+        self._config.use_search = False
+        self._config.en_layer_info = [(15, 'softplus')]
+        self._config.layer_info = [(1000, 'relu')]
+        self._config.noise_rate = 2*self.hyperparams["lr"]
+        self._config.alpha = 1.0
+
+        self._config.l2_penalty = self.hyperparams["l2_penalty"]
+        self._config.inf_iter = 10
+        self._config.inf_rate = 0.5
+        self._config.margin_weight = 100.0
+        # self._config.output_num = output_num
+        # config.input_num = input_num
+        self._config.inf_penalty = 0.01
+        self._config.loglevel = 0
+        self._config.score_margin = 0.01
+        self._config.score_max = 1.0
+
     def get_params(self) -> Params:
         param = Params(
                         _mlp_model = self._model,
@@ -196,7 +217,7 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
                                           size=np.shape(xbatch))
                 self._model.set_train_iter(i*(ntrain//bs)+b)
                 o = self._model.train_batch(noisex, ybatch, verbose=0)
-                loss.append(o/bs)
+                # loss.append(o/bs)
             yval_output = self._model.map_predict(xinput=self._val_inputs)
             ytr_output = self._model.map_predict(xinput=self._training_inputs)
         self._fitted = True
@@ -300,10 +321,71 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         tf = importlib.import_module("tensorflow")
         tf.reset_default_graph()
         # print(self._config.input_num, self._config.output_num)
-        m = mlp.MLP(self._config)
-        m.createOptimizer()
-        m.get_loss = m.ce_loss
-        m.get_prediction_network = m.mlp_prediction_network
-        m.construct()
-        m.init()
-        return m
+        # m = mlp.MLP(self._config)
+        # m.createOptimizer()
+        # m.get_loss = m.ce_loss
+        # m.get_prediction_network = m.mlp_prediction_network
+        # m.construct()
+        # m.init()
+        # return m
+
+        s = sg_spen.SPEN(self._config)
+        s.createOptimizer()
+        s.evaluate = evaluate_score
+        s.get_energy = types.MethodType(get_energy_mlp, s)
+        s.train_batch = s.train_unsupervised_sg_batch
+        s.construct(training_type=sg_spen.TrainingType.Rank_Based)
+        print("Energy:")
+        # s.print_vars()
+        s.init()
+        return s
+
+def get_energy_mlp(self, xinput=None, yinput=None, embedding=None, reuse=False):
+    output_size = yinput.get_shape().as_list()[-1]
+    with tf.variable_scope(self.config.spen_variable_scope):
+        with tf.variable_scope(self.config.fx_variable_scope) as scope:
+            net = xinput
+            j = 0
+            for (sz, a) in self.config.layer_info:
+                net = tflearn.fully_connected(net, sz,
+                                              weight_decay=self.config.weight_decay, activation=a,
+                                              weights_init=tfi.variance_scaling(),
+                                              bias_init=tfi.zeros(), regularizer='L2', reuse=reuse,
+                                              scope=("fx.h" + str(j)))
+                net = tflearn.dropout(net, 1.0 - self.config.dropout)
+                j = j + 1
+            logits = tflearn.fully_connected(net, output_size, activation='linear', regularizer='L2',
+                                             weight_decay=self.config.weight_decay,
+                                             weights_init=tfi.variance_scaling(), bias_init=tfi.zeros(),
+                                             reuse=reuse, scope="fx.fc")
+
+            mult = logits * yinput
+            local_e = tf.reduce_sum(mult, axis=1)
+        with tf.variable_scope(self.config.en_variable_scope) as scope:
+            j = 0
+            net = yinput
+            for (sz, a) in self.config.en_layer_info:
+                net = tflearn.fully_connected(net, sz,
+                                              weight_decay=self.config.weight_decay,
+                                              weights_init=tfi.variance_scaling(),
+                                              activation=a,
+                                              bias=False,
+                                              reuse=reuse, regularizer='L2',
+                                              scope=("en.h" + str(j)))
+
+                j = j + 1
+            global_e = tf.squeeze(
+                tflearn.fully_connected(net, 1, activation='linear', weight_decay=self.config.weight_decay,
+                                        weights_init=tfi.variance_scaling(), bias=False,
+                                        reuse=reuse, regularizer='L2',
+                                        scope=("en.g")))
+
+    return tf.squeeze(tf.add(local_e, global_e))
+
+def f1_score_c_ar(cpred, ctrue):
+    intersection = np.sum(np.minimum(cpred, ctrue), 1)
+    union = np.sum(np.maximum(cpred, ctrue), 1)
+    return np.divide(2.0 * intersection, union + intersection)
+
+def evaluate_score(xinput=None, yinput=None, yt=None):
+    return np.array(f1_score_c_ar(yinput, yt))
