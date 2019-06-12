@@ -2,7 +2,7 @@
 from setuptools import setup
 
 setup(name='dsbox-spen',
-      version='1.0.0',
+      version='1.0.1',
       url='https://github.com/rooshenas/dsbox-spen/tree/dsbox3',
       maintainer_email='Ke-Thia Yao',
       maintainer='kyao@isi.edu',

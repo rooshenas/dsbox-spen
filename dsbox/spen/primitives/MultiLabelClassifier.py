@@ -4,7 +4,7 @@ import numpy as np
 import copy
 
 # importing d3m stuff
-from d3m import exceptions
+# from d3m import exceptions
 from d3m.container.pandas import DataFrame
 from d3m.primitive_interfaces.base import CallResult
 from d3m.primitive_interfaces.supervised_learning import SupervisedLearnerPrimitiveBase
@@ -12,8 +12,8 @@ from d3m.metadata import hyperparams, params
 
 from dsbox.spen.primitives import config
 from dsbox.spen.core import config as cf, sg_spen
-from dsbox.spen.utils.metrics import f1_score, hamming_loss
-from dsbox.spen.utils.datasets import get_layers, get_data_val
+# from dsbox.spen.utils.metrics import f1_score, hamming_loss
+# from dsbox.spen.utils.datasets import get_layers, get_data_val
 import tflearn
 import types
 import tflearn.initializations as tfi
@@ -86,7 +86,7 @@ class MLCHyperparams(hyperparams.Hyperparams):
 
 class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHyperparams]):
     """
-    Multi-label classfier primitive
+    Multi-label classifier primitive using structured prediction energy networks (SPEN).
     """
 
     __author__ = 'UMASS/Pedram Rooshenas'
@@ -127,12 +127,12 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         self._epochs = self.hyperparams["epochs"]
         self._batch_size = self.hyperparams["batch_size"]
         self._config = cf.Config()
-        self._config.learning_rate=self.hyperparams["lr"]
-        self._config.weight_decay=self.hyperparams["lr_decay"]
-        self._config.dropout=self.hyperparams["dropout_rate"]
-        self._config.dimension=self.hyperparams["dimension"]
-        self._config.pred_layer_info=[(self.hyperparams["pred_layer_size"],
-                             self.hyperparams["pred_layer_type"])]
+        self._config.learning_rate = self.hyperparams["lr"]
+        self._config.weight_decay = self.hyperparams["lr_decay"]
+        self._config.dropout = self.hyperparams["dropout_rate"]
+        self._config.dimension = self.hyperparams["dimension"]
+        self._config.pred_layer_info = [(self.hyperparams["pred_layer_size"],
+                                         self.hyperparams["pred_layer_type"])]
         self._config.use_search = False
         self._config.en_layer_info = [(15, 'softplus')]
         self._config.layer_info = [(1000, 'relu')]
@@ -334,6 +334,7 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         s.init()
         return s
 
+
 def get_energy_mlp(self, xinput=None, yinput=None, embedding=None, reuse=False):
     output_size = yinput.get_shape().as_list()[-1]
     with tf.variable_scope(self.config.spen_variable_scope):
@@ -376,10 +377,12 @@ def get_energy_mlp(self, xinput=None, yinput=None, embedding=None, reuse=False):
 
     return tf.squeeze(tf.add(local_e, global_e))
 
+
 def f1_score_c_ar(cpred, ctrue):
     intersection = np.sum(np.minimum(cpred, ctrue), 1)
     union = np.sum(np.maximum(cpred, ctrue), 1)
     return np.divide(2.0 * intersection, union + intersection)
+
 
 def evaluate_score(xinput=None, yinput=None, yt=None):
     return np.array(f1_score_c_ar(yinput, yt))
