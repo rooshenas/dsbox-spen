@@ -1,7 +1,11 @@
-import typing
-import importlib
-import numpy as np
 import copy
+import enum
+import importlib
+import random
+import typing
+
+import numpy as np
+import pandas as pd
 
 # importing d3m stuff
 # from d3m import exceptions
@@ -14,13 +18,29 @@ from dsbox.spen.primitives import config
 from dsbox.spen.core import config as cf, sg_spen
 # from dsbox.spen.utils.metrics import f1_score, hamming_loss
 # from dsbox.spen.utils.datasets import get_layers, get_data_val
-import tflearn
 import types
-import tflearn.initializations as tfi
 
 
 Inputs = DataFrame
 Outputs = DataFrame
+
+
+class LabelStyle(enum.Enum):
+    CSV = 1
+    ARRAY = 2
+    ONE_LABEL_PER_ROW = 3
+    SINGLE_LABEL = 4
+
+    # CSV example:
+    # 1, '3,25,34'
+
+    # Array example:
+    # 1, np.array(['3', '25', '34'])
+
+    # ONE_LABEL_PER_ROW example:
+    # 1, '3'
+    # 1, '25'
+    # 1, '34'
 
 
 class Params(params.Params):
@@ -77,11 +97,6 @@ class MLCHyperparams(hyperparams.Hyperparams):
         default=100,
         description='Batch size'
     )
-    bib = hyperparams.Hyperparameter[bool](
-        semantic_types=['https://metadata.datadrivendiscovery.org/types/ControlParameter'],
-        default=False,
-        description='Bibtext dataset is a special dataset with different way for data processing, this params is to check whether or not'
-    )
 
 
 class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHyperparams]):
@@ -122,6 +137,8 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         self._fitted = False
         self._inited = False
         self._model = None
+        self._label_style = LabelStyle.CSV
+        self._index = []
         self._training_inputs = None
         self._training_outputs = None
         self._epochs = self.hyperparams["epochs"]
@@ -152,12 +169,13 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
 
     def get_params(self) -> Params:
         param = Params(
-                        _mlp_model=self._model,
-                        _class_name_to_number=self._labels,
-                        _target_column_name=self._label_name,
-                        _features=self._features,
-                        _index=self._index
-                      )
+            _mlp_model=self._model,
+            _class_name_to_number=self._labels,
+            _target_column_name=self._label_name,
+            _features=self._features,
+            _index=self._index,
+            _label_style=self._label_style,
+        )
         return param
 
     def set_params(self, *, params: Params) -> None:
@@ -166,25 +184,46 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         self._label_name = params["_target_column_name"]
         self._features = params["_features"]
         self._index = params["_index"]
+        self._label_style = params["_label_style"]
 
     def set_training_data(self, *, inputs: Inputs, outputs: Outputs) -> None:
+        if len(inputs) == 0:
+            raise ValueError('Training data size is zero')
+
         if len(inputs) != len(outputs):
             raise ValueError('Training data sequences "inputs" and "outputs" should have the same length.')
-        # self._training_size = len(inputs)
-        # self._training_inputs = inputs.values
+
+        self._label_style = self._detect_label_style(inputs, outputs)
+
         if 'd3mIndex' in outputs.columns:
-            self._index = outputs['d3mIndex'].tolist()
             outputs = outputs.drop(columns=["d3mIndex"])
+
+        if self._label_style == LabelStyle.ONE_LABEL_PER_ROW:
+            # convert to array style
+            inputs, outputs = self._convert_to_array_style(inputs, outputs)
+
         self._label_name = outputs.columns[0]
+        if 'd3mIndex' in inputs.columns:
+            self._index = inputs['d3mIndex'].tolist()
+            inputs = inputs.drop(columns=["d3mIndex"])
         self._features = list(inputs.columns)
+
         inputs = inputs.values
         outputs = outputs.values.ravel()
-        if self.hyperparams['bib']:
-            self._labels = list(self._get_labels_bib(outputs))  # only works for bibtex
-            outputs = self._bit_mapper_bib(outputs, self._labels)
-        else:
-            self._labels = list(self._get_labels(outputs))  # general
+
+        if self._label_style == LabelStyle.CSV:
+            # Comma separated labels
+            self._labels = sorted(list(self._get_csv_labels(outputs)))
+            outputs = self._bit_mapper_csv(outputs, self._labels)
+        elif self._label_style == LabelStyle.ONE_LABEL_PER_ROW or self._label_style == LabelStyle.ARRAY:
+            # ONE_LABEL_PER_ROW converted to ARRAY label
+            self._labels = sorted(list(self._get_array_labels(outputs)))
+            outputs = self._bit_mapper_array(outputs, self._labels)
+        elif self._label_style == LabelStyle.SINGLE_LABEL:
+            self._labels = sorted(list(self._get_labels(outputs)))
             outputs = self._bit_mapper(outputs, self._labels)
+        else:
+            raise ValueError(f'Label encoding style not recognized: {self._label_style}')
         self._training_inputs, self._val_inputs = inputs[:int(len(inputs)*0.8)], inputs[int(len(inputs)*0.8):]
         self._training_outputs, self._val_outputs = outputs[:int(len(inputs)*0.8)], outputs[int(len(inputs)*0.8):]
         self._config.input_num = self._training_inputs.shape[1]
@@ -225,28 +264,45 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
         print("start producing")
         if not self._model:
             raise ValueError("model is not fitted or loaded")
-        inputs_nd = inputs.values
-        res = self._model.map_predict(xinput=inputs_nd)
+
+        index = None
         if 'd3mIndex' in inputs.columns:
             index = inputs['d3mIndex']
-            if not self.hyperparams['bib']:
-                res_df = DataFrame(data=np.array([index,
-                                                  self._genearte_outputs(res)]).T,
-                                   columns=['d3mIndex', self._label_name])
-            else:
-                res_df = DataFrame(data=np.array([index,
-                                                  self._genearte_outputs_bib(res)]).T,
-                                   columns=['d3mIndex', self._label_name])
+            inputs = inputs.drop(columns=["d3mIndex"])
+        if self._label_style == LabelStyle.ONE_LABEL_PER_ROW:
+            inputs_nd = self._unique_index(inputs, index).values
         else:
-            res_df = DataFrame(data=np.array(self._genearte_outputs(res)).T, columns=[self._label_name])
+            inputs_nd = inputs.values
+        res = self._model.map_predict(xinput=inputs_nd)
+
+        if index is not None:
+            if self._label_style == LabelStyle.CSV:
+                res_df = DataFrame(data=np.array([index,
+                                                  self._generate_outputs_csv(res)]).T,
+                                   columns=['d3mIndex', self._label_name])
+            elif self._label_style == LabelStyle.ONE_LABEL_PER_ROW:
+                res_df = DataFrame(data=np.array([index,
+                                                  self._generate_outputs_single(res, index)]).T,
+                                   columns=['d3mIndex', self._label_name])
+            elif self._label_style == LabelStyle.ARRAY:
+                res_df = DataFrame(data=np.array([index,
+                                                  self._generate_outputs_array(res)]).T,
+                                   columns=['d3mIndex', self._label_name])
+            elif self._label_style == LabelStyle.SINGLE_LABEL:
+                res_df = DataFrame(data=np.array([index,
+                                                  self._generate_outputs(res)]).T,
+                                   columns=['d3mIndex', self._label_name])
+
+        else:
+            res_df = DataFrame(data=np.array(self._generate_outputs(res)).T, columns=[self._label_name])
         self._has_finished = True
         self._iterations_done = True
         print("finished")
         return CallResult(res_df, self._has_finished, self._iterations_done)
 
-    def _genearte_outputs(self, res):
+    def _generate_outputs(self, res):
         output = []
-        labels = sorted(list(self._labels))
+        labels = self._labels
         for i in range(len(res)):
             for j, v in enumerate(list(res[i, :])):
                 if v == 1.0:
@@ -257,9 +313,9 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
                     break
         return output
 
-    def _genearte_outputs_bib(self, res): # need improve
+    def _generate_outputs_csv(self, res): # need improve
         output = []
-        labels = sorted(list(self._labels))
+        labels = self._labels
 
         for i in range(len(res)):
             tmp = []
@@ -270,25 +326,131 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
             output.append(val)
         return output
 
+    def _generate_outputs_array(self, res): # need improve
+        output = []
+        labels = self._labels
+
+        for i in range(len(res)):
+            tmp = []
+            for j, v in enumerate(list(res[i, :])):
+                if v == 1.0:
+                    tmp.append(str(labels[j]))
+            output.append(np.asarray(tmp))
+        return output
+
+    def _generate_outputs_single(self, res, index):
+        output = []
+        labels = self._labels
+
+        # Count number of repeats for each index value
+        repeats = {}
+        for _, d3mIndex in index.iteritems():
+            if d3mIndex in repeats:
+                repeats[d3mIndex] = repeats[d3mIndex] + 1
+            else:
+                repeats[d3mIndex] = 1
+
+        unique_index = index.unique()
+        output_dict = {}
+        for d3mIndex, repeat in repeats.items():
+            i = np.where(unique_index == d3mIndex)[0][0]
+            label_list = []
+            count = 0
+            for j, v in enumerate(list(res[i, :])):
+                if v == 1.0:
+                    label_list.append(str(labels[j]))
+                    count += 1
+                    if count == repeat:
+                        break
+            if (count < repeat):
+                # Not enough labels, select rest randomly
+                for label in random.choices(labels, k=repeat-count):
+                    label_list.append(str(label))
+            output_dict[d3mIndex] = label_list
+
+        for _, d3mIndex in index.iteritems():
+            output.append(output_dict[d3mIndex].pop())
+        return output
+
+    def _detect_label_style(self, inputs, outputs) -> LabelStyle:
+        if 'd3mIndex' in inputs:
+            index = inputs['d3mIndex']
+            if (len(set(index))) < len(index):
+                return LabelStyle.ONE_LABEL_PER_ROW
+
+        sample = outputs.iloc[0, -1]
+        if isinstance(sample, np.ndarray) or isinstance(sample, pd.Series):
+            return LabelStyle.ARRAY
+
+        commas = 0
+        for value in outputs.iloc[:, -1]:
+            commas += value.count(',')
+
+        if commas > 0:
+            return LabelStyle.CSV
+        else:
+            return LabelStyle.SINGLE_LABEL
+
+    def _convert_to_array_style(self, inputs, outputs):
+        ''''
+        Convert single label per row format to array of labels format
+        '''
+        index_column = inputs['d3mIndex']
+
+        new_inputs = inputs.iloc[:len(index_column), :]
+        new_outputs = outputs.iloc[:len(index_column), :]
+
+        labels = {}
+        for row_index, value in index_column.iteritems():
+            label = outputs.iloc[row_index, 0]
+            if value in labels:
+                labels[value].append(label)
+            else:
+                new_inputs.iloc[len(labels), 0] = new_inputs.iloc[row_index, 0]
+                labels[value] = [label]
+        for row_index, value in new_inputs['d3mIndex'].iteritems():
+            new_outputs.iloc[row_index, 0] = labels[value]
+        return new_inputs, new_outputs
+
+    def _unique_index(self, inputs: DataFrame, index: pd.Series) -> DataFrame:
+        '''
+        Remove rows with duplicate index
+        '''
+        unique_index = index.unique()
+        new_inputs = pd.DataFrame(inputs.iloc[:len(unique_index), :])
+        seen = set()
+        for row_index, row in inputs.iterrows():
+            if index[row_index] not in seen:
+                new_inputs.iloc[len(seen), :] = row
+                seen.add(index[row_index])
+        return new_inputs
+
+    def _get_array_labels(self, target):
+        label_set = set()
+        for array in target:
+            for v in array:
+                label_set.add(v)
+        return label_set
+
     def _get_labels(self, target):
         label_set = set()
         for v in target:
             label_set.add(v)
         return label_set
 
-    def _get_labels_bib(self, target):
+    def _get_csv_labels(self, target):
         label_set = set()
         for v in target:
             if v.startswith("["):
                 for word in v[1, -1].split(","):
-                    label_set.add(int(word))
+                    label_set.add(word)
             else:
                 for word in v.split(","):
-                    label_set.add(int(word))
+                    label_set.add(word)
         return label_set
 
-    def _bit_mapper(self, target, label_set):
-        columns_list = sorted(list(label_set))
+    def _bit_mapper(self, target, label_list):
+        columns_list = label_list
         res_target = np.zeros((len(target), len(columns_list)))
         target_copy = copy.copy(target)
         for i in range(target_copy.shape[0]):
@@ -296,22 +458,34 @@ class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHy
             res_target[i, j] = 1
         return res_target
 
-    def _bit_mapper_bib(self, target, label_set):
-        columns_list = sorted(list(label_set))
+    def _bit_mapper_csv(self, target, label_list):
+        columns_list = label_list
         res_target = np.zeros((len(target), len(columns_list)))
         for i, v in enumerate(target.tolist()):
             if v.startswith("["):
                 for word in v.split(","):
-                    j = columns_list.index(int(word))
+                    j = columns_list.index(word)
                     res_target[i, j] = 1
             else:
                 for word in v.split(","):
-                    j = columns_list.index(int(word))
+                    j = columns_list.index(word)
                     res_target[i, j] = 1
         return res_target
 
+    def _bit_mapper_array(self, target, label_list):
+        columns_list = label_list
+        res_target = np.zeros((len(target), len(columns_list)))
+        for i, v in enumerate(target.tolist()):
+            for word in v:
+                j = columns_list.index(word)
+                res_target[i, j] = 1
+        return res_target
+
     def _lazy_init(self):
-        global tf
+        global tf, tflearn, tfi
+
+        tflearn = importlib.import_module('tflearn')
+        tfi = importlib.import_module('tflearn.initializations')
         tf = importlib.import_module("tensorflow")
         tf.reset_default_graph()
         # print(self._config.input_num, self._config.output_num)
