@@ -102,7 +102,11 @@ class MLCHyperparams(hyperparams.Hyperparams):
 class MLClassifier(SupervisedLearnerPrimitiveBase[Inputs, Outputs, Params, MLCHyperparams]):
     """
     Multi-label classifier primitive using structured prediction energy networks (SPEN).
+    SPEN assumes a deep neural network over both features and output labels, and uses gradient-descent inference to predict the output labels at the test time.
+    The structure of the deep neural network decomposes into local energy terms and global networks.
+    The number of inference iteration and infereance rate are tunable for different setting.
     """
+    
 
     __author__ = 'UMASS/Pedram Rooshenas'
     metadata = hyperparams.base.PrimitiveMetadata({
